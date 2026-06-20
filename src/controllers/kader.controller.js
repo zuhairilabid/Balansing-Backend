@@ -170,7 +170,7 @@ const unggahAnak = async (req, res) => {
     // --- 1. Panggil API untuk memeriksa anemia ---
     let isAnemic;
     try {
-      const anemiaResponse = await fetch('https://seruzu-balansing.hf.space/anemia', {
+      const anemiaResponse = await fetch(`${process.env.ML_API_URL}/anemia`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -212,7 +212,7 @@ const unggahAnak = async (req, res) => {
         kelaminUntukAPI = 'l';
       }
 
-      const stuntingResponse = await fetch('https://seruzu-balansing.hf.space/stunting', {
+      const stuntingResponse = await fetch(`${process.env.ML_API_URL}/stunting`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -314,7 +314,7 @@ const editAnak = async (req, res) => {
 
     let isAnemic;
     try {
-      const anemiaResponse = await fetch('https://seruzu-balansing.hf.space/anemia', {
+      const anemiaResponse = await fetch(`${process.env.ML_API_URL}/anemia`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -356,7 +356,7 @@ const editAnak = async (req, res) => {
         kelaminUntukAPI = 'l';
       }
 
-      const stuntingResponse = await fetch('https://seruzu-balansing.hf.space/stunting', {
+      const stuntingResponse = await fetch(`${process.env.ML_API_URL}/stunting`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

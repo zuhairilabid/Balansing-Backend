@@ -324,7 +324,7 @@ const addAnak = async (req, res) => {
         kelaminUntukAPI = 'l';
       }
 
-      const stuntingResponse = await fetch('https://seruzu-balansing.hf.space/stunting', {
+      const stuntingResponse = await fetch(`${process.env.ML_API_URL}/stunting`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -365,7 +365,7 @@ const addAnak = async (req, res) => {
         kelaminUntukAPI = 'l';
       }
 
-      const zResponse = await fetch('https://seruzu-balansing.hf.space/zscore', {
+      const zResponse = await fetch(`${process.env.ML_API_URL}/zscore`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -471,7 +471,7 @@ const editAnakIbu = async (req, res) => {
         kelaminUntukAPI = 'l';
       }
 
-      const stuntingResponse = await fetch('https://seruzu-balansing.hf.space/stunting', {
+      const stuntingResponse = await fetch(`${process.env.ML_API_URL}/stunting`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -745,7 +745,7 @@ const cekMakanan = async (req, res) => {
     const formData = new FormData();
     formData.append('file', fs.createReadStream(file.path), file.originalname);
 
-    const yoloResponse = await axios.post('https://seruzu-balansing.hf.space/yolo', formData, {
+    const yoloResponse = await axios.post(`${process.env.ML_API_URL}/yolo`, formData, {
       headers: {
         ...formData.getHeaders(),
       },
@@ -800,7 +800,7 @@ const addRecapAnak = async (req, res) => {
     // --- 1. Panggil API untuk memeriksa anemia ---
     let isAnemic;
     try {
-      const anemiaResponse = await fetch('https://seruzu-balansing.hf.space/anemia', {
+      const anemiaResponse = await fetch(`${process.env.ML_API_URL}/anemia`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -840,7 +840,7 @@ const addRecapAnak = async (req, res) => {
         kelaminUntukAPI = 'l';
       }
 
-      const stuntingResponse = await fetch('https://seruzu-balansing.hf.space/stunting', {
+      const stuntingResponse = await fetch(`${process.env.ML_API_URL}/stunting`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -885,7 +885,7 @@ const addRecapAnak = async (req, res) => {
         kelaminUntukAPI = 'l';
       }
 
-      const zResponse = await fetch('https://seruzu-balansing.hf.space/zscore', {
+      const zResponse = await fetch(`${process.env.ML_API_URL}/zscore`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
