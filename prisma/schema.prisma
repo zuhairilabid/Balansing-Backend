@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Definisikan enum untuk tipe stunting
+enum StuntingType {
+  SangatPendek
+  Pendek
+  Normal
+  Tinggi
+}
+
+model GlobalSchedule {
+  key             String    @id // Kunci unik, misal: "CHECK_RESET_DATE"
+  value_date      DateTime  // Tanggal target berikutnya untuk reset
+  last_execution  DateTime? // Kapan terakhir kali fungsi reset dijalankan
+}
+
+model User {
+  email      String     @id
+  id         String
+  jenis      String
+
+  kader      Kader?     @relation("KaderUser")
+  ibuRumah   IbuRumah?  @relation("IbuUser")
+}
+
+model Kader {
+  id              String      @id @default(cuid())
+  email           String      @unique
+  namaPuskesmas   String
+  namaPosyandu    String
+  provinsi        String
+  kota            String
+  kecamatan       String
+  kelurahan       String
+  rt              String
+  rw              String
+  kodePos         String?
+  rekomendasi     DateTime   @default(now())
+  tinjauan        String?
+
+  user            User        @relation("KaderUser", fields: [email], references: [email])
+  anakKader       AnakKader[]
+}
+
+model IbuRumah {
+  id          String      @id @default(cuid())
+  email       String      @unique
+  provinsi    String
+  nama        String
+  kota        String
+  kecamatan   String
+  kelurahan   String
+  rt          String
+  rw          String
+  kodePos     String?
+  alamat      String
+  usia        Int
+  noTelp      String
+  cekAnak     Boolean?
+  sanitasi    Boolean?
+
+  user        User        @relation("IbuUser", fields: [email], references: [email])
+  anakAnak    AnakIbu[]
+}
+
+model AnakIbu {
+  id            String       @id @default(cuid())
+  emailIbu      String
+  nama          String
+  usia          DateTime
+  beratBadan    Float
+  tinggiBadan   Float
+  beratBadanL   Float?
+  tinggiBadanL  Float?
+  stunting      StuntingType // Ganti tipe data stunting menjadi enum
+  anemia        Boolean
+  jenisKelamin  String
+  cekMingguan   Boolean  @default(false)
+  zscore        Float?
+  
+
+  ibu           IbuRumah     @relation(fields: [emailIbu], references: [email])
+
+  recapAnak       RecapAnak[] 
+}
+
+model AnakKader {
+  id                    String       @id @default(cuid())
+  nama                  String
+  namaIbu               String
+  usia                  Int
+  beratBadan            Float
+  tinggiBadan           Float
+  anemia                Boolean
+  stunting              StuntingType // Ganti tipe data stunting menjadi enum
+  jenisKelamin          String
+  tanggal               DateTime?
+  konjungtivitaNormal   Boolean?
+  kukuBersih            Boolean?
+  tampakLemas           Boolean?
+  tampakPucat           Boolean?
+  riwayatAnemia         Boolean?
+  
+  kaderEmail            String
+  kader                 Kader        @relation(fields: [kaderEmail], references: [email])
+}
+
+model RecapAnak {
+  kodeRecap            String           @id @default(cuid())
+  anakIbuId            String
+  tanggal              DateTime
+  beratBadan           Float
+  tinggiBadan          Float
+  usia                 Int
+  anemia               Boolean
+  stunting             StuntingType
+  konjungtivitasNormal Boolean
+  kukuBersih           Boolean
+  riwayatAnemia        Boolean
+  tampakLemas          Boolean
+  tampakPucat          Boolean
+  rekomendasi          String
+
+  anakIbu AnakIbu @relation(fields: [anakIbuId], references: [id])
+}
+
+model Artikel {
+  id      String   @id @default(cuid())
+  judul   String
+  tanggal DateTime
+  konten  String
+  gambar  String?
+  tags    Tag[]    @relation(name: "ArtikelTags")
+}
+
+model Tag {
+  id       String   @id @default(cuid())
+  nama     String   @unique
+  artikel  Artikel[] @relation(name: "ArtikelTags")
+}

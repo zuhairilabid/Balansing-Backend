@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "AnakIbu" ADD COLUMN     "beratBadanL" DOUBLE PRECISION,
+ADD COLUMN     "tinggiBadanL" DOUBLE PRECISION;
