@@ -587,13 +587,71 @@ const registerIbu = async (req, res) => {
   }
 };
 
+const cleanupUnconfirmedUsers = async () => {
+  console.log('[CLEANUP] Memulai pembersihan akun yang belum diverifikasi...');
+  try {
+    const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers();
+    if (error) {
+      console.error('[CLEANUP] Error fetching users dari Supabase:', error);
+      return;
+    }
+
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+    
+    // Filter users: belum konfirmasi email & dibuat lebih dari 7 hari yang lalu
+    const unconfirmedOldUsers = users.filter(user => 
+      !user.email_confirmed_at && new Date(user.created_at) < sevenDaysAgo
+    );
+
+    if (unconfirmedOldUsers.length === 0) {
+      console.log('[CLEANUP] Tidak ada akun sampah yang perlu dihapus.');
+      return;
+    }
+
+    let deletedCount = 0;
+    for (const user of unconfirmedOldUsers) {
+      const email = user.email;
+      
+      try {
+        // Cari di tabel User Prisma
+        const prismaUser = await prisma.user.findUnique({ where: { email } });
+        
+        if (prismaUser) {
+          // Hapus child data terlebih dahulu berdasarkan jenis
+          if (prismaUser.jenis === 'KADER') {
+            await prisma.kader.deleteMany({ where: { email } });
+          } else if (prismaUser.jenis === 'IBU') {
+            await prisma.ibuRumah.deleteMany({ where: { email } });
+          }
+          
+          // Hapus user di Prisma
+          await prisma.user.delete({ where: { email } });
+        }
+
+        // Hapus dari Supabase Auth
+        await supabaseAdmin.auth.admin.deleteUser(user.id);
+        deletedCount++;
+        console.log(`[CLEANUP] Berhasil menghapus akun sampah: ${email}`);
+      } catch (err) {
+        console.error(`[CLEANUP] Gagal menghapus akun ${email}:`, err);
+      }
+    }
+    
+    console.log(`[CLEANUP] Selesai. Total ${deletedCount} akun sampah dihapus.`);
+  } catch (error) {
+    console.error('[CLEANUP] Fatal error during cleanup:', error);
+  }
+};
+
 module.exports = {
   changePassword,
-  login,
-  registerKader,
-  logout,
-  requestPasswordReset,
+  login,
+  registerKader,
+  logout,
+  requestPasswordReset,
   handleResetPasswordPage,
   updatePasswordFromForm,
   registerIbu,
+  cleanupUnconfirmedUsers,
 };
