@@ -59,10 +59,10 @@ const registerKader = async (req, res) => {
   try {
     // 1. Membuat user di autentikasi Supabase
     // Supabase akan menghash password ini secara otomatis di auth.users
-    const { data: supabaseUser, error: supabaseError } = await supabaseAdmin.auth.signUp({ // Gunakan supabaseAdmin
-      email: email,
-      password: password,
-    });
+    const { data: supabaseUser, error: supabaseError } = await supabase.auth.signUp({
+      email: email,
+      password: password,
+    });
 
     if (supabaseError) {
       console.error("Supabase registration error:", supabaseError.message);
@@ -499,11 +499,10 @@ const registerIbu = async (req, res) => {
   try {
     // 1. Membuat user di autentikasi Supabase
     // Supabase akan menghash password ini secara otomatis di auth.users
-    const { data: supabaseUser, error: supabaseError } = await supabaseAdmin.auth.admin.createUser({ // Menggunakan admin API untuk bypass limit
-      email_confirm: true,
+    const { data: supabaseUser, error: supabaseError } = await supabase.auth.signUp({
       email: email,
-      password: password,
-    });
+      password: password,
+    });
 
     if (supabaseError) {
       console.error("Supabase registration error:", supabaseError.message);
