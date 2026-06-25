@@ -167,6 +167,11 @@ const unggahAnak = async (req, res) => {
 
     const usiaInMonths = (parseInt(umurTahun) * 12) + parseInt(umurBulan);
 
+    // Validasi Usia Balita (Maksimal 60 bulan / 5 tahun)
+    if (usiaInMonths > 60) {
+      return res.status(400).json({ message: "Usia anak tidak boleh lebih dari 60 bulan (5 tahun) untuk pemeriksaan Stunting." });
+    }
+
     // --- 1. Panggil API untuk memeriksa anemia ---
     let isAnemic;
     try {
@@ -307,6 +312,11 @@ const editAnak = async (req, res) => {
     console.log(konjungtivitaNormal, kukuBersih, tampakLemas, tampakPucat, riwayatAnemia);
 
     const usiaInMonths = (parseInt(umurTahun) * 12) + parseInt(umurBulan);
+    
+    // Validasi Usia Balita (Maksimal 60 bulan / 5 tahun)
+    if (usiaInMonths > 60) {
+      return res.status(400).json({ message: "Usia anak tidak boleh lebih dari 60 bulan (5 tahun) untuk pemeriksaan Stunting." });
+    }
     //Panggil API Python dengan parameter konjungtivitaNormal, kukuBersih, tampakLemas, tampakPucat, riwayatAnemia
     //Return stunting dan anemia
 
@@ -464,8 +474,9 @@ const getAnakKaderByMonth = async (req, res) => {
       return res.status(400).json({ error: "Email, month, count, and year are required." });
     }
 
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month - 1 + count, 0);
+    // Mengubah filter agar melihat ke belakang (backward) bukan ke depan (forward)
+    const startDate = new Date(year, month - count, 1);
+    const endDate = new Date(year, month, 0);
 
     const anakKader = await prisma.anakKader.findMany({
       where: {
