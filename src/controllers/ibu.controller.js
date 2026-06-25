@@ -65,15 +65,15 @@ const getIbu = async (req, res) => {
         });
 
         // 3. Error Handling (Schedule)
+        // PERBAIKAN: Jangan melempar error 500, biarkan profil tetap dimuat dengan nilai schedule null
         if (!schedule || !schedule.value_date) {
-            return res.status(500).json({ message: "Konfigurasi jadwal global tidak ditemukan." });
+            ibu.jadwalResetBerikutnya = null; 
+            ibu.terakhirDijalankan = null;
+        } else {
+            // 4. Modifikasi Objek IbuRumah (Menyisipkan Jadwal)
+            ibu.jadwalResetBerikutnya = schedule.value_date; 
+            ibu.terakhirDijalankan = schedule.last_execution;
         }
-        
-        // 4. Modifikasi Objek IbuRumah (Menyisipkan Jadwal)
-        
-        // Tambahkan properti dari schedule ke objek ibu
-        ibu.jadwalResetBerikutnya = schedule.value_date; 
-        ibu.terakhirDijalankan = schedule.last_execution; // Menambahkan last_execution juga
         
         // 5. Kirim Respon JSON
         return res.status(200).json(ibu);
@@ -343,13 +343,12 @@ const addAnak = async (req, res) => {
       }
 
       const stuntingResult = await stuntingResponse.json();
-      // !!! PERBAIKAN: Ambil nilai String dari key 'status' di respons API
-      stuntingStatus = stuntingResult.status; 
+      stuntingStatus = stuntingResult; 
       
     } catch (error) {
       console.error("Error calling stunting API:", error);
       // Hentikan proses dan kirim error
-      return res.status(500).json({ error: "Failed to get stunting status from API (Stunting Check)." });
+      return res.status(500).json({ error: `Failed to get stunting status from API (Stunting Check). Detail: ${error.message}` });
     }
 
     // --- 2. Panggil API untuk mendapatkan Z-Score ---
@@ -384,8 +383,8 @@ const addAnak = async (req, res) => {
       }
 
       const zResult = await zResponse.json();
-      // !!! PERBAIKAN: Ambil nilai Float dari key 'z_score' di respons API
-      zscore = zResult.z_score; 
+      // !!! PERBAIKAN: Ambil nilai langsung karena Python API mereturn float
+      zscore = zResult;
       
     } catch (error) {
       console.error("Error calling Z-score API:", error);
@@ -428,9 +427,7 @@ const addAnak = async (req, res) => {
 
   } catch (error) {
     console.error("Error adding anak:", error);
-    // Jika error sudah ditangani dan respons dikirim di blok catch internal,
-    // maka error di sini adalah error yang tidak terduga.
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: `Internal Server Error: ${error.message}` });
   }
 };
 
@@ -490,8 +487,7 @@ const editAnakIbu = async (req, res) => {
       }
 
       const stuntingResult = await stuntingResponse.json();
-      // !!! PERBAIKAN: Ambil nilai String dari key 'status' di respons API
-      stuntingStatus = stuntingResult.status; 
+      stuntingStatus = stuntingResult; 
       
     } catch (error) {
       console.error("Error calling stunting API:", error);

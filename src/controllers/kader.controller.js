@@ -189,8 +189,7 @@ const unggahAnak = async (req, res) => {
       }
 
       const anemiaResult = await anemiaResponse.json();
-      // !!! PERBAIKAN: Ambil nilai Boolean dari key 'anemia' di respons API
-      isAnemic = anemiaResult.anemia; 
+      isAnemic = anemiaResult; 
       
     } catch (error) {
       console.error("Error calling anemia API:", error);
@@ -231,8 +230,7 @@ const unggahAnak = async (req, res) => {
       }
 
       const stuntingResult = await stuntingResponse.json();
-      // !!! PERBAIKAN: Ambil nilai String dari key 'status' di respons API
-      stuntingStatus = stuntingResult.status; 
+      stuntingStatus = stuntingResult; 
       
     } catch (error) {
       console.error("Error calling stunting API:", error);
@@ -377,7 +375,7 @@ const editAnak = async (req, res) => {
       }
 
       const stuntingResult = await stuntingResponse.json();
-      stuntingStatus = stuntingResult.status; // Mengambil nilai string dari respons
+      stuntingStatus = stuntingResult; // Mengambil nilai string dari respons
     } catch (error) {
       console.error("Error calling stunting API:", error);
       // Lempar error untuk menghentikan proses unggah jika API gagal
