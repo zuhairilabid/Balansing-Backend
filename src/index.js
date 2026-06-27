@@ -4,7 +4,7 @@ require("dotenv").config();
 const session = require("express-session");
 const cron = require("node-cron");
 const { passport } = require("./passport");
-const { runScheduledBatchAnalisis, resetIbuRumahChecks } = require("./controllers");
+const { runScheduledBatchAnalisis, resetIbuRumahChecks, cleanupUnconfirmedUsers } = require("./controllers");
 
 const router = require("./routers");
 const NotFoundMiddleware = require("./middlewares/NotFoundHandler");
@@ -58,6 +58,15 @@ cron.schedule('00 00 1 * *', async () => {
   } catch (error) {
     console.error('❌ [CRON SCHEDULER] Error menjalankan batch analisis:', error);
   }
+}, {
+  scheduled: true,
+  timezone: "Asia/Jakarta"
+});
+
+cron.schedule('0 2 * * *', async () => {
+  console.log('\n🗑️ [CRON SCHEDULER] Triggered: Sapu Bersih Akun Sampah (Unconfirmed > 7 hari)');
+  console.log(`Waktu: ${new Date().toLocaleString('id-ID')}`);
+  await cleanupUnconfirmedUsers();
 }, {
   scheduled: true,
   timezone: "Asia/Jakarta"

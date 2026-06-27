@@ -167,6 +167,11 @@ const unggahAnak = async (req, res) => {
 
     const usiaInMonths = (parseInt(umurTahun) * 12) + parseInt(umurBulan);
 
+    // Validasi Usia Balita (Maksimal 60 bulan / 5 tahun)
+    if (usiaInMonths > 60) {
+      return res.status(400).json({ message: "Usia anak tidak boleh lebih dari 60 bulan (5 tahun) untuk pemeriksaan Stunting." });
+    }
+
     // --- 1. Panggil API untuk memeriksa anemia ---
     let isAnemic;
     try {
@@ -189,8 +194,7 @@ const unggahAnak = async (req, res) => {
       }
 
       const anemiaResult = await anemiaResponse.json();
-      // !!! PERBAIKAN: Ambil nilai Boolean dari key 'anemia' di respons API
-      isAnemic = anemiaResult.anemia; 
+      isAnemic = anemiaResult; 
       
     } catch (error) {
       console.error("Error calling anemia API:", error);
@@ -231,8 +235,7 @@ const unggahAnak = async (req, res) => {
       }
 
       const stuntingResult = await stuntingResponse.json();
-      // !!! PERBAIKAN: Ambil nilai String dari key 'status' di respons API
-      stuntingStatus = stuntingResult.status; 
+      stuntingStatus = stuntingResult; 
       
     } catch (error) {
       console.error("Error calling stunting API:", error);
@@ -309,6 +312,11 @@ const editAnak = async (req, res) => {
     console.log(konjungtivitaNormal, kukuBersih, tampakLemas, tampakPucat, riwayatAnemia);
 
     const usiaInMonths = (parseInt(umurTahun) * 12) + parseInt(umurBulan);
+    
+    // Validasi Usia Balita (Maksimal 60 bulan / 5 tahun)
+    if (usiaInMonths > 60) {
+      return res.status(400).json({ message: "Usia anak tidak boleh lebih dari 60 bulan (5 tahun) untuk pemeriksaan Stunting." });
+    }
     //Panggil API Python dengan parameter konjungtivitaNormal, kukuBersih, tampakLemas, tampakPucat, riwayatAnemia
     //Return stunting dan anemia
 
@@ -377,7 +385,7 @@ const editAnak = async (req, res) => {
       }
 
       const stuntingResult = await stuntingResponse.json();
-      stuntingStatus = stuntingResult.status; // Mengambil nilai string dari respons
+      stuntingStatus = stuntingResult; // Mengambil nilai string dari respons
     } catch (error) {
       console.error("Error calling stunting API:", error);
       // Lempar error untuk menghentikan proses unggah jika API gagal
@@ -466,8 +474,9 @@ const getAnakKaderByMonth = async (req, res) => {
       return res.status(400).json({ error: "Email, month, count, and year are required." });
     }
 
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month - 1 + count, 0);
+    // Mengubah filter agar melihat ke belakang (backward) bukan ke depan (forward)
+    const startDate = new Date(year, month - count, 1);
+    const endDate = new Date(year, month, 0);
 
     const anakKader = await prisma.anakKader.findMany({
       where: {
