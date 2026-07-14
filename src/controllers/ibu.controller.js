@@ -1092,15 +1092,25 @@ const resetIbuRumahChecks = async () => {
         },
       });
 
-      console.log(`[CRON] Berhasil mereset ${updateResult.count} data IbuRumah.`);
+      // Mereset cekMingguan menjadi TRUE untuk SEMUA Anak
+      const updateAnak = await prisma.anakIbu.updateMany({
+        data: {
+          cekMingguan: true,
+        }
+      });
+
+      console.log(`[CRON] Berhasil mereset ${updateResult.count} data IbuRumah dan ${updateAnak.count} data AnakIbu.`);
 
       // 4. Hitung Tanggal Target Baru (+14 hari dari TANGGAL TARGET LAMA)
-      // Penting: Selalu tambahkan 14 hari dari target lama, bukan dari hari ini.
-      const newTargetDate = addDays(targetDateStart, DAYS_TO_ADD);
+      // Penting: Selalu tambahkan 14 hari sampai target baru berada di masa depan
+      let newTargetDate = addDays(targetDateStart, DAYS_TO_ADD);
+      while (isPast(newTargetDate) || newTargetDate.getTime() === todayStart.getTime()) {
+        newTargetDate = addDays(newTargetDate, DAYS_TO_ADD);
+      }
 
       // 5. Update Tanggal Target Global di DB
       await prisma.globalSchedule.update({
-        where: { key: 'CHECK_RESET_DATE' },
+        where: { key: '1' },
         data: {
           value_date: newTargetDate,
           last_execution: new Date(),
