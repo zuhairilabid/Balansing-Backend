@@ -59,7 +59,8 @@ const registerKader = async (req, res) => {
   try {
     // 1. Membuat user di autentikasi Supabase
     // Supabase akan menghash password ini secara otomatis di auth.users
-    const { data: supabaseUser, error: supabaseError } = await supabase.auth.signUp({
+    const { data: supabaseUser, error: supabaseError } = await supabaseAdmin.auth.admin.createUser({
+      email_confirm: true,
       email: email,
       password: password,
     });
@@ -499,7 +500,8 @@ const registerIbu = async (req, res) => {
   try {
     // 1. Membuat user di autentikasi Supabase
     // Supabase akan menghash password ini secara otomatis di auth.users
-    const { data: supabaseUser, error: supabaseError } = await supabase.auth.signUp({
+    const { data: supabaseUser, error: supabaseError } = await supabaseAdmin.auth.admin.createUser({
+      email_confirm: true,
       email: email,
       password: password,
     });
