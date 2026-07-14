@@ -65,14 +65,23 @@ const getIbu = async (req, res) => {
     });
 
     // 3. Error Handling (Schedule)
-    // PERBAIKAN: Jangan melempar error 500, biarkan profil tetap dimuat dengan nilai schedule null
     if (!schedule || !schedule.value_date) {
       ibu.jadwalResetBerikutnya = null;
-      ibu.terakhirDijalankan = null;
     } else {
-      // 4. Modifikasi Objek IbuRumah (Menyisipkan Jadwal)
       ibu.jadwalResetBerikutnya = schedule.value_date;
-      ibu.terakhirDijalankan = schedule.last_execution;
+    }
+
+    // 4. Ambil Tanggal Pengecekan Terakhir Sebenarnya dari RecapAnak
+    const latestRecap = await prisma.recapAnak.findFirst({
+      where: { anakIbu: { emailIbu: email } },
+      orderBy: { tanggal: 'desc' },
+      select: { tanggal: true }
+    });
+
+    if (latestRecap) {
+      ibu.terakhirDijalankan = latestRecap.tanggal;
+    } else {
+      ibu.terakhirDijalankan = null; // Belum pernah cek
     }
 
     // 5. Kirim Respon JSON
