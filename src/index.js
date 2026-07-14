@@ -74,5 +74,9 @@ cron.schedule('0 2 * * *', async () => {
 
 
 app.listen(port, () => {
-  console.log(`🚀 Server running on port ${port}`); // PERBAIKI: Pakai ()
+  console.log(`🚀 Server running on port ${port}`);
+  
+  // Lakukan pengecekan jadwal reset saat server pertama kali menyala (Wake-up Check)
+  console.log(`[BOOT] Memeriksa jadwal reset IbuRumah...`);
+  resetIbuRumahChecks();
 });
