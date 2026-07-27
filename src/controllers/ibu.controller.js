@@ -228,8 +228,9 @@ const getDashboardAnak = async (req, res) => {
       statusStunting: dataTerbaru.stunting,
       statusAnemia: dataTerbaru.anemia,
       zScore: anakIbu.zscore,
-      bbSebelumnya: dataSebelumnya ? dataSebelumnya.beratBadan : null,
-      tbSebelumnya: dataSebelumnya ? dataSebelumnya.tinggiBadan : null,
+      // Jika dataSebelumnya null (belum ada history pemeriksaan), fallback ke beratBadanL dan tinggiBadanL dari AnakIbu
+      bbSebelumnya: dataSebelumnya ? dataSebelumnya.beratBadan : anakIbu.beratBadanL,
+      tbSebelumnya: dataSebelumnya ? dataSebelumnya.tinggiBadan : anakIbu.tinggiBadanL,
       rataRataBB12Bulan: averageBB.toFixed(2),
       rataRataTB12Bulan: averageTB.toFixed(2),
       data12BulanTerakhir: {
@@ -427,6 +428,25 @@ const addAnak = async (req, res) => {
     // Create AnakIbu record
     const anakIbuRecord = await prisma.anakIbu.create({
       data: anakIbuData,
+    });
+
+    // Create Initial Recap (Data Pendaftaran)
+    await prisma.recapAnak.create({
+      data: {
+        anakIbuId: anakIbuRecord.id,
+        tanggal: new Date(),
+        beratBadan: parseFloat(beratBadan),
+        tinggiBadan: parseFloat(tinggiBadan),
+        usia: usiaInMonths,
+        anemia: false,
+        stunting: stuntingStatus,
+        konjungtivitasNormal: true,
+        kukuBersih: true,
+        riwayatAnemia: false,
+        tampakLemas: false,
+        tampakPucat: false,
+        rekomendasi: "Data pendaftaran awal. Belum ada rekomendasi dari asisten AI.",
+      }
     });
 
     // Update IbuRumah agar bisa langsung melakukan cek
@@ -705,6 +725,8 @@ const getRecapAnakbyId = async (req, res) => {
             nama: true,
             jenisKelamin: true,
             id: true,
+            beratBadanL: true,
+            tinggiBadanL: true,
             ibu: {
               select: {
                 nama: true
@@ -720,7 +742,7 @@ const getRecapAnakbyId = async (req, res) => {
     }
 
     // Mencari recap sebelumnya untuk anak yang sama
-    const previousRecap = await prisma.recapAnak.findFirst({
+    let previousRecap = await prisma.recapAnak.findFirst({
       where: {
         anakIbuId: currentRecap.anakIbuId,
         tanggal: {
@@ -731,6 +753,15 @@ const getRecapAnakbyId = async (req, res) => {
         tanggal: 'desc', // Mengurutkan dari yang paling baru ke yang paling lama
       },
     });
+
+    if (!previousRecap) {
+      // Fallback: Jika ini adalah cek kesehatan pertama dan belum ada recap pendaftaran (untuk user lama)
+      // Gunakan data lahir (L) sebagai data sebelumnya agar UI tidak menampilkan angka 0
+      previousRecap = {
+        beratBadan: currentRecap.anakIbu.beratBadanL,
+        tinggiBadan: currentRecap.anakIbu.tinggiBadanL,
+      };
+    }
 
     // Menggabungkan data recap saat ini dan recap sebelumnya ke dalam satu objek
     const responseData = {
