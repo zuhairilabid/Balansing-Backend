@@ -1159,9 +1159,11 @@ async function resetIbuRumahChecks() {
 
       // 4. Hitung Tanggal Target Baru (+14 hari dari TANGGAL TARGET LAMA)
       // Penting: Selalu tambahkan 14 hari sampai target baru berada di masa depan
-      let newTargetDate = addDays(targetDateStart, DAYS_TO_ADD);
-      while (isPast(newTargetDate) || newTargetDate.getTime() === todayStart.getTime()) {
-        newTargetDate = addDays(newTargetDate, DAYS_TO_ADD);
+      // Menggunakan epoch math agar komponen jam (T17:00 UTC) tidak terhapus oleh startOfDay
+      let newTargetDate = new Date(schedule.value_date.getTime() + DAYS_TO_ADD * 24 * 60 * 60 * 1000);
+      const nowMs = new Date().getTime();
+      while (newTargetDate.getTime() <= nowMs) {
+        newTargetDate = new Date(newTargetDate.getTime() + DAYS_TO_ADD * 24 * 60 * 60 * 1000);
       }
 
       // 5. Update Tanggal Target Global di DB
