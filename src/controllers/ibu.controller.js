@@ -39,6 +39,10 @@ const prisma = new PrismaClient();
 const getIbu = async (req, res) => {
   const { email } = req.params;
   try {
+    // 0. Pengecekan Lazy Evaluation Callback
+    // Memastikan reset dijalankan jika cron job di background gagal/terlewat
+    await resetIbuRumahChecks();
+
     // --- QUERY 1: Ambil data IbuRumah ---
     // Query ini akan dijalankan dan ditunggu hasilnya
     const ibu = await prisma.ibuRumah.findUnique({
@@ -1099,7 +1103,7 @@ const getArticlebyId = async (req, res) => {
   }
 };
 
-const resetIbuRumahChecks = async () => {
+async function resetIbuRumahChecks() {
   try {
     // 1. Ambil Tanggal Target Global dari DB
     const schedule = await prisma.globalSchedule.findUnique({
