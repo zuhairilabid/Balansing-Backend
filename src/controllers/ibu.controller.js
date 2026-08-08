@@ -36,6 +36,12 @@ const supabaseAdmin = createClient(
 
 const prisma = new PrismaClient();
 
+// Helper untuk shift zona waktu ke WIB khusus untuk frontend yang membaca string UTC langsung
+const toWIB = (date) => {
+  if (!date) return date;
+  return new Date(date.getTime() + 7 * 60 * 60 * 1000);
+};
+
 const getIbu = async (req, res) => {
   const { email } = req.params;
   try {
@@ -72,7 +78,7 @@ const getIbu = async (req, res) => {
     if (!schedule || !schedule.value_date) {
       ibu.jadwalResetBerikutnya = null;
     } else {
-      ibu.jadwalResetBerikutnya = schedule.value_date;
+      ibu.jadwalResetBerikutnya = toWIB(schedule.value_date);
     }
 
     // 4. Ambil Tanggal Pengecekan Terakhir Sebenarnya dari RecapAnak
@@ -83,7 +89,7 @@ const getIbu = async (req, res) => {
     });
 
     if (latestRecap) {
-      ibu.terakhirDijalankan = latestRecap.tanggal;
+      ibu.terakhirDijalankan = toWIB(latestRecap.tanggal);
     } else {
       ibu.terakhirDijalankan = null; // Belum pernah cek
     }
@@ -221,7 +227,7 @@ const getDashboardAnak = async (req, res) => {
       nama: anakIbu.nama,
       rekomendasi: dataTerbaru.rekomendasi,
       jenisKelamin: anakIbu.jenisKelamin,
-      tanggalPeriksaTerakhir: dataTerbaru.tanggal,
+      tanggalPeriksaTerakhir: toWIB(dataTerbaru.tanggal),
       bb: dataTerbaru.beratBadan,
       tb: dataTerbaru.tinggiBadan,
       bbL: anakIbu.beratBadanL,
@@ -683,6 +689,7 @@ const getRecapAnakMonthly = async (req, res) => {
       delete recap.anakIbu;
       return {
         ...recap,
+        tanggal: toWIB(recap.tanggal),
         nama: nama,
         jenisKelamin: jenisKelamin,
         id: id,
@@ -763,6 +770,13 @@ const getRecapAnakbyId = async (req, res) => {
         beratBadan: currentRecap.anakIbu.beratBadanL,
         tinggiBadan: currentRecap.anakIbu.tinggiBadanL,
       };
+    }
+
+    if (currentRecap && currentRecap.tanggal) {
+      currentRecap.tanggal = toWIB(currentRecap.tanggal);
+    }
+    if (previousRecap && previousRecap.tanggal) {
+      previousRecap.tanggal = toWIB(previousRecap.tanggal);
     }
 
     // Menggabungkan data recap saat ini dan recap sebelumnya ke dalam satu objek
