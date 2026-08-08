@@ -39,12 +39,21 @@ const getKader = async (req, res) => {
 
     const kader = await prisma.kader.findUnique({
       where: { email },
+      include: {
+        posyandu: true,
+      }
     });
 
     if (!kader) {
       // If no kader is found with the given email
       return res.status(404).json({ error: "Kader not found." });
     }
+
+    if (kader.posyanduId && kader.posyandu) {
+      kader.provinsi = kader.posyandu.provinsi || kader.provinsi;
+      kader.kota = kader.posyandu.kota || kader.kota;
+    }
+    delete kader.posyandu;
 
     // If kader is found, send it as a JSON response
     res.status(200).json(kader);
@@ -67,16 +76,37 @@ const editKader = async (req, res) => {
       rt,
       rw,
       email, // Pastikan email ini datang dari body untuk identifikasi user yang akan diupdate
+      posyanduId,
     } = req.body;
 
     // Pastikan semua field yang ingin diupdate ada di req.body
     // Jika ada field lain seperti 'name', 'phone', 'address' yang juga ingin diupdate,
     // pastikan itu juga disertakan di req.body dan skema Prisma Anda.
+    // Jika posyanduId diberikan, tarik data Puskesmas dan Posyandu dari DB
+    let finalNamaPuskesmas = namaPuskesmas;
+    let finalNamaPosyandu = namaPosyandu;
+
+    try {
+      if (posyanduId) {
+        const posyanduData = await prisma.posyandu.findUnique({
+          where: { id: posyanduId },
+          include: { puskesmas: true }
+        });
+        if (posyanduData) {
+          finalNamaPosyandu = posyanduData.namaPosyandu;
+          finalNamaPuskesmas = posyanduData.puskesmas.namaPuskesmas;
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching posyandu:", err);
+    }
+
     const updatedKader = await prisma.kader.update({
       where: { email: email }, // Menggunakan email dari req.body sebagai kriteria WHERE
       data: {
-        namaPuskesmas: namaPuskesmas,
-        namaPosyandu: namaPosyandu,
+        posyanduId: posyanduId || undefined,
+        namaPuskesmas: finalNamaPuskesmas,
+        namaPosyandu: finalNamaPosyandu,
         provinsi: provinsi,
         kota: kota,
         kecamatan: kecamatan,
@@ -100,11 +130,67 @@ const getRecap = async (req, res) => {
       return res.status(400).json({ error: "Email is required." });
     }
 
+    const kader = await prisma.kader.findUnique({
+      where: { email },
+    });
+
     const recap = await prisma.anakKader.findMany({
       where: { kaderEmail: email },
     });
 
-    res.status(200).json(recap || { message: "No recap found for this kader." });
+    let allAnakIbuRecaps = [];
+    if (kader && kader.posyanduId) {
+      const recapAnakList = await prisma.recapAnak.findMany({
+        where: {
+          anakIbu: {
+            ibu: {
+              posyanduId: kader.posyanduId
+            }
+          }
+        },
+        include: {
+          anakIbu: {
+            include: { ibu: true }
+          }
+        }
+      });
+
+      // Filter to only include the LATEST recap for each child
+      recapAnakList.sort((a, b) => new Date(b.tanggal) - new Date(a.tanggal));
+      const uniqueRecaps = [];
+      const seenAnakIds = new Set();
+      
+      for (const r of recapAnakList) {
+        if (!seenAnakIds.has(r.anakIbuId)) {
+          seenAnakIds.add(r.anakIbuId);
+          uniqueRecaps.push(r);
+        }
+      }
+
+      allAnakIbuRecaps = uniqueRecaps.map(r => ({
+        id: r.kodeRecap, 
+        nama: r.anakIbu.nama,
+        namaIbu: r.anakIbu.ibu.nama,
+        usia: r.usia,
+        beratBadan: r.beratBadan,
+        tinggiBadan: r.tinggiBadan,
+        anemia: r.anemia,
+        stunting: r.stunting,
+        jenisKelamin: r.anakIbu.jenisKelamin,
+        tanggal: r.tanggal,
+        konjungtivitaNormal: r.konjungtivitasNormal,
+        kukuBersih: r.kukuBersih,
+        tampakLemas: r.tampakLemas,
+        tampakPucat: r.tampakPucat,
+        riwayatAnemia: r.riwayatAnemia,
+        kaderEmail: email 
+      }));
+    }
+
+    const combinedRecap = [...recap, ...allAnakIbuRecaps];
+    console.log(`[DEBUG getRecap] kaderEmail: ${email}, recap(AnakKader): ${recap.length}, allAnakIbuRecaps(RecapAnak): ${allAnakIbuRecaps.length}, Total: ${combinedRecap.length}`);
+
+    res.status(200).json(combinedRecap.length > 0 ? combinedRecap : { message: "No recap found for this kader." });
   } catch (error) {
     console.error("Error fetching recap:", error);
     res.status(500).json({ error: "Internal Server Error" });
@@ -474,6 +560,10 @@ const getAnakKaderByMonth = async (req, res) => {
       return res.status(400).json({ error: "Email, month, count, and year are required." });
     }
 
+    const kader = await prisma.kader.findUnique({
+      where: { email },
+    });
+
     // Mengubah filter agar melihat ke belakang (backward) bukan ke depan (forward)
     const startDate = new Date(year, month - count, 1);
     const endDate = new Date(year, month, 0);
@@ -491,11 +581,70 @@ const getAnakKaderByMonth = async (req, res) => {
       },
     });
 
-    if (!anakKader || anakKader.length === 0) {
+    let allAnakIbuRecaps = [];
+    if (kader && kader.posyanduId) {
+      const recapAnakList = await prisma.recapAnak.findMany({
+        where: {
+          tanggal: {
+            gte: startDate,
+            lte: endDate,
+          },
+          anakIbu: {
+            ibu: {
+              posyanduId: kader.posyanduId
+            }
+          }
+        },
+        include: {
+          anakIbu: {
+            include: { ibu: true }
+          }
+        },
+        orderBy: {
+          tanggal: 'asc',
+        }
+      });
+
+      // Filter to only include the LATEST recap for each child in this period
+      recapAnakList.sort((a, b) => new Date(b.tanggal) - new Date(a.tanggal));
+      const uniqueRecaps = [];
+      const seenAnakIds = new Set();
+      
+      for (const r of recapAnakList) {
+        if (!seenAnakIds.has(r.anakIbuId)) {
+          seenAnakIds.add(r.anakIbuId);
+          uniqueRecaps.push(r);
+        }
+      }
+
+      allAnakIbuRecaps = uniqueRecaps.map(r => ({
+        id: r.kodeRecap, 
+        nama: r.anakIbu.nama,
+        namaIbu: r.anakIbu.ibu.nama,
+        usia: r.usia,
+        beratBadan: r.beratBadan,
+        tinggiBadan: r.tinggiBadan,
+        anemia: r.anemia,
+        stunting: r.stunting,
+        jenisKelamin: r.anakIbu.jenisKelamin,
+        tanggal: r.tanggal,
+        konjungtivitaNormal: r.konjungtivitasNormal,
+        kukuBersih: r.kukuBersih,
+        tampakLemas: r.tampakLemas,
+        tampakPucat: r.tampakPucat,
+        riwayatAnemia: r.riwayatAnemia,
+        kaderEmail: email 
+      }));
+    }
+
+    const combinedRecap = [...anakKader, ...allAnakIbuRecaps];
+    combinedRecap.sort((a, b) => new Date(a.tanggal) - new Date(b.tanggal));
+
+    if (!combinedRecap || combinedRecap.length === 0) {
       return res.status(404).json({ message: "No data found for the specified period." });
     }
 
-    res.status(200).json(anakKader);
+    res.status(200).json(combinedRecap);
   } catch (error) {
     console.error("Error fetching data:", error);
     res.status(500).json({ error: "Internal Server Error" });

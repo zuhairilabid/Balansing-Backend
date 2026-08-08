@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // Definisikan enum untuk tipe stunting
@@ -16,104 +17,140 @@ enum StuntingType {
 }
 
 model GlobalSchedule {
-  key             String    @id // Kunci unik, misal: "CHECK_RESET_DATE"
-  value_date      DateTime  // Tanggal target berikutnya untuk reset
-  last_execution  DateTime? // Kapan terakhir kali fungsi reset dijalankan
+  key            String    @id // Kunci unik, misal: "CHECK_RESET_DATE"
+  value_date     DateTime // Tanggal target berikutnya untuk reset
+  last_execution DateTime? // Kapan terakhir kali fungsi reset dijalankan
+}
+
+model Puskesmas {
+  id            String  @id @default(cuid())
+  namaPuskesmas String  @unique
+  alamatLengkap String?
+
+  posyandu Posyandu[]
+}
+
+model Posyandu {
+  id            String  @id @default(cuid())
+  namaPosyandu  String
+  puskesmasId   String
+  provinsi      String?
+  kota          String?
+  kecamatan     String?
+  kelurahan     String
+  rt            String?
+  rw            String?
+  alamatLengkap String?
+
+  puskesmas Puskesmas  @relation(fields: [puskesmasId], references: [id])
+  kader     Kader[]
+  ibu       IbuRumah[]
 }
 
 model User {
-  email      String     @id
-  id         String
-  jenis      String
+  email String @id
+  id    String
+  jenis String
 
-  kader      Kader?     @relation("KaderUser")
-  ibuRumah   IbuRumah?  @relation("IbuUser")
+  kader    Kader?    @relation("KaderUser")
+  ibuRumah IbuRumah? @relation("IbuUser")
 }
 
 model Kader {
-  id              String      @id @default(cuid())
-  email           String      @unique
-  namaPuskesmas   String
-  namaPosyandu    String
-  provinsi        String
-  kota            String
-  kecamatan       String
-  kelurahan       String
-  rt              String
-  rw              String
-  kodePos         String?
-  rekomendasi     DateTime   @default(now())
-  tinjauan        String?
+  id         String  @id @default(cuid())
+  email      String  @unique
+  authId     String? @unique
+  noTelp     String? @unique
+  posyanduId String?
 
-  user            User        @relation("KaderUser", fields: [email], references: [email])
-  anakKader       AnakKader[]
+  namaPuskesmas String
+  namaPosyandu  String
+  provinsi      String
+  kota          String
+  kecamatan     String
+  kelurahan     String
+  rt            String
+  rw            String
+  kodePos       String?
+  rekomendasi   DateTime @default(now())
+  tinjauan      String?
+
+  posyandu  Posyandu?   @relation(fields: [posyanduId], references: [id])
+  user      User        @relation("KaderUser", fields: [email], references: [email])
+  anakKader AnakKader[]
 }
 
 model IbuRumah {
-  id          String      @id @default(cuid())
-  email       String      @unique
-  provinsi    String
-  nama        String
-  kota        String
-  kecamatan   String
-  kelurahan   String
-  rt          String
-  rw          String
-  kodePos     String?
-  alamat      String
-  usia        Int
-  noTelp      String
-  cekAnak     Boolean?
-  sanitasi    Boolean?
+  id         String  @id @default(cuid())
+  email      String  @unique
+  authId     String? @unique
+  posyanduId String?
 
-  user        User        @relation("IbuUser", fields: [email], references: [email])
-  anakAnak    AnakIbu[]
+  provinsi  String
+  nama      String
+  kota      String
+  kecamatan String
+  kelurahan String
+  rt        String
+  rw        String
+  kodePos   String?
+  alamat    String
+  usia      Int
+  noTelp    String
+  cekAnak   Boolean?
+  sanitasi  Boolean?
+
+  posyandu    Posyandu? @relation(fields: [posyanduId], references: [id])
+  user        User      @relation("IbuUser", fields: [email], references: [email])
+  anakAnak    AnakIbu[] @relation("OldAnakIbu")
+  anakAnakNew AnakIbu[] @relation("NewAnakIbu")
 }
 
 model AnakIbu {
-  id            String       @id @default(cuid())
-  emailIbu      String
-  nama          String
-  usia          DateTime
-  beratBadan    Float
-  tinggiBadan   Float
-  beratBadanL   Float?
-  tinggiBadanL  Float?
-  stunting      StuntingType // Ganti tipe data stunting menjadi enum
-  anemia        Boolean
-  jenisKelamin  String
-  cekMingguan   Boolean  @default(false)
-  zscore        Float?
-  
+  id           String       @id @default(cuid())
+  emailIbu     String
+  ibuId        String?
+  nama         String
+  usia         DateTime
+  beratBadan   Float
+  tinggiBadan  Float
+  beratBadanL  Float?
+  tinggiBadanL Float?
+  stunting     StuntingType // Ganti tipe data stunting menjadi enum
+  anemia       Boolean
+  jenisKelamin String
+  cekMingguan  Boolean      @default(false)
+  zscore       Float?
 
-  ibu           IbuRumah     @relation(fields: [emailIbu], references: [email])
+  ibu    IbuRumah  @relation("OldAnakIbu", fields: [emailIbu], references: [email])
+  ibuNew IbuRumah? @relation("NewAnakIbu", fields: [ibuId], references: [id])
 
-  recapAnak       RecapAnak[] 
+  recapAnak RecapAnak[]
 }
 
 model AnakKader {
-  id                    String       @id @default(cuid())
-  nama                  String
-  namaIbu               String
-  usia                  Int
-  beratBadan            Float
-  tinggiBadan           Float
-  anemia                Boolean
-  stunting              StuntingType // Ganti tipe data stunting menjadi enum
-  jenisKelamin          String
-  tanggal               DateTime?
-  konjungtivitaNormal   Boolean?
-  kukuBersih            Boolean?
-  tampakLemas           Boolean?
-  tampakPucat           Boolean?
-  riwayatAnemia         Boolean?
-  
-  kaderEmail            String
-  kader                 Kader        @relation(fields: [kaderEmail], references: [email])
+  id                  String       @id @default(cuid())
+  nama                String
+  namaIbu             String
+  usia                Int
+  beratBadan          Float
+  tinggiBadan         Float
+  anemia              Boolean
+  stunting            StuntingType // Ganti tipe data stunting menjadi enum
+  jenisKelamin        String
+  tanggal             DateTime?
+  konjungtivitaNormal Boolean?
+  kukuBersih          Boolean?
+  tampakLemas         Boolean?
+  tampakPucat         Boolean?
+  riwayatAnemia       Boolean?
+
+  kaderEmail String
+  kader      Kader  @relation(fields: [kaderEmail], references: [email])
 }
 
 model RecapAnak {
-  kodeRecap            String           @id @default(cuid())
+  kodeRecap            String       @id @default(cuid())
   anakIbuId            String
   tanggal              DateTime
   beratBadan           Float
@@ -141,7 +178,7 @@ model Artikel {
 }
 
 model Tag {
-  id       String   @id @default(cuid())
-  nama     String   @unique
-  artikel  Artikel[] @relation(name: "ArtikelTags")
+  id      String    @id @default(cuid())
+  nama    String    @unique
+  artikel Artikel[] @relation(name: "ArtikelTags")
 }

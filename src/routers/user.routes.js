@@ -1,11 +1,13 @@
 const express = require("express");
 const { passport } = require("../passport");
 
-const { login, registerKader, logout, requestPasswordReset, handleResetPasswordPage, updatePasswordFromForm, registerIbu } = require("../controllers");
+const { login, registerKader, logout, requestPasswordReset, handleResetPasswordPage, updatePasswordFromForm, registerIbu, getAllPosyandu } = require("../controllers");
 
 const { loginRateLimiter } = require("../middlewares/RateLimit");
 
 const router = express.Router();
+
+router.get("/master/posyandu", getAllPosyandu);
 
 router.post("/registerKader", registerKader);
 router.post("/registerIbu", registerIbu)
