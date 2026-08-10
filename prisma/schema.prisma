@@ -41,6 +41,8 @@ model Posyandu {
   rt            String?
   rw            String?
   alamatLengkap String?
+  rekomendasi   DateTime @default(now())
+  tinjauan      String?
 
   puskesmas Puskesmas  @relation(fields: [puskesmasId], references: [id])
   kader     Kader[]
@@ -72,8 +74,6 @@ model Kader {
   rt            String
   rw            String
   kodePos       String?
-  rekomendasi   DateTime @default(now())
-  tinjauan      String?
 
   posyandu  Posyandu?   @relation(fields: [posyanduId], references: [id])
   user      User        @relation("KaderUser", fields: [email], references: [email])

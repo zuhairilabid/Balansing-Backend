@@ -1,7 +1,7 @@
 const express = require("express");
 const { passport, authenticateJWT } = require("../passport");
 const multer = require('multer');
-const { getBatchAllAnak ,getAnalisisGizi ,getAnalisisSanitasi ,getIbu, getArticlebyId ,getAllArticle ,getDashboardAnak, editIbu, addAnak, getAllAnak, getAnakIbubyId, editAnakIbu, deleteAnakbyId, addRecapAnak, getRecapAnakbyId, getRecapAnakMonthly, getAllRecapAnak, cekMakanan, getAnalisisMakanan  } = require("../controllers");
+const { editRecapAnakIbu, tambahRecapAnakOlehKader, getBatchAllAnak ,getAnalisisGizi ,getAnalisisSanitasi ,getIbu, getArticlebyId ,getAllArticle ,getDashboardAnak, editIbu, addAnak, getAllAnak, getAnakIbubyId, editAnakIbu, deleteAnakbyId, addRecapAnak, getRecapAnakbyId, getRecapAnakMonthly, getAllRecapAnak, cekMakanan, getAnalisisMakanan  } = require("../controllers");
 const path = require('path');
 const fs = require('fs'); // <--- PENTING: Tambahkan ini untuk menggunakan modul fs
 const { loginRateLimiter } = require("../middlewares/RateLimit");
@@ -39,6 +39,8 @@ router.get("/anak/:email", authenticateJWT, getAllAnak);
 router.delete("/anak/:id", authenticateJWT, deleteAnakbyId);
 
 router.post("/recap", authenticateJWT, addRecapAnak);
+router.put("/recap/:id", authenticateJWT, editRecapAnakIbu);
+router.post("/recap-kader", authenticateJWT, tambahRecapAnakOlehKader);
 
 router.get("/recap/:id", authenticateJWT, getRecapAnakbyId);
 router.post("/recapMonthly", authenticateJWT, getRecapAnakMonthly);
@@ -56,8 +58,10 @@ router.post("/analisis-makanan", authenticateJWT, getAnalisisMakanan);
 
 router.get("/getbatch", getBatchAllAnak);
 
-router.get("/test1", (req, res) => {
-    res.send("Test");
+router.get("/test1", async (req, res) => {
+    const prisma = require('../db');
+    const kaders = await prisma.kader.findMany({ select: { email: true } });
+    res.json(kaders);
 }); // debugging
 
 router.get("/test2", (req, res) => {

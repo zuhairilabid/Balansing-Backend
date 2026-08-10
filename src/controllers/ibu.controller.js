@@ -1,6 +1,5 @@
 // controllers/user.controller.js
 
-const { PrismaClient } = require("@prisma/client");
 const ClientError = require("../errors/ClientError");
 const { createClient } = require('@supabase/supabase-js');
 // const bcrypt = require('bcryptjs'); // Tidak perlu lagi jika Supabase yang menghash
@@ -34,7 +33,7 @@ const supabaseAdmin = createClient(
   }
 );
 
-const prisma = new PrismaClient();
+const prisma = require('../db');
 
 // Helper untuk shift zona waktu ke WIB khusus untuk frontend yang membaca string UTC langsung
 const toWIB = (date) => {
@@ -670,14 +669,30 @@ const getRecapAnakMonthly = async (req, res) => {
       include: {
         anakIbu: {
           select: {
-            // Pilih field yang ingin Anda sertakan
             emailIbu: true,
-            nama: true, // Asumsikan ada field 'namaIbu'
+            nama: true,
             jenisKelamin: true,
             id: true,
+            usia: true,
           },
         },
       },
+      orderBy: [
+        { tanggal: 'desc' },
+        { anakIbu: { usia: 'asc' } }
+      ]
+    });
+
+    // Dapatkan urutan anak berdasarkan usia (tanggal lahir)
+    const allAnak = await prisma.anakIbu.findMany({
+      where: { emailIbu: ibuId },
+      orderBy: { usia: 'asc' }, // yang lahir duluan (tanggal terkecil) jadi anak pertama
+      select: { id: true }
+    });
+
+    const anakOrderMap = {};
+    allAnak.forEach((anak, index) => {
+      anakOrderMap[anak.id] = index + 1;
     });
 
     // Ubah struktur data agar nama ibu berada di level yang sama
@@ -685,6 +700,7 @@ const getRecapAnakMonthly = async (req, res) => {
       const nama = recap.anakIbu.nama;
       const jenisKelamin = recap.anakIbu.jenisKelamin;
       const id = recap.anakIbu.id;
+      const childNumber = anakOrderMap[id] || 1;
       // Hapus objek relasi aslinya untuk menjaga struktur tetap datar
       delete recap.anakIbu;
       return {
@@ -693,7 +709,32 @@ const getRecapAnakMonthly = async (req, res) => {
         nama: nama,
         jenisKelamin: jenisKelamin,
         id: id,
+        childNumber: childNumber,
       };
+    });
+
+    // Urutkan ulang secara eksplisit (berjaga-jaga jika ada masalah dengan Prisma relation sorting)
+    formattedRecap.sort((a, b) => {
+      // 1. Waktu terbaru riwayat cek (descending), absolut hingga menit dan detik
+      const dateA = new Date(a.tanggal).getTime();
+      const dateB = new Date(b.tanggal).getTime();
+      
+      if (dateA !== dateB) {
+        return dateB - dateA;
+      }
+      // 2. Urutan anak keberapa (ascending)
+      return (a.childNumber || 0) - (b.childNumber || 0);
+    });
+
+    // Tandai hanya 1 riwayat terbaru per anak yang bisa diedit
+    const seenAnakIds = new Set();
+    formattedRecap.forEach(recap => {
+      if (!seenAnakIds.has(recap.id)) {
+        recap.isEditable = true;
+        seenAnakIds.add(recap.id);
+      } else {
+        recap.isEditable = false;
+      }
     });
 
     return res.status(200).json(formattedRecap);
@@ -851,6 +892,33 @@ const addRecapAnak = async (req, res) => {
     console.log(tampakLemas)
     console.log(tampakPucat);
 
+    // --- 0. Idempotency Check (Pencegahan Duplikat per Hari) ---
+    // Cegah anak yang sama membuat riwayat baru lebih dari 1 kali di hari yang sama
+    if (anakId && tanggal) {
+      const targetDate = new Date(tanggal);
+      
+      const startOfDay = new Date(targetDate);
+      startOfDay.setHours(0,0,0,0);
+      
+      const endOfDay = new Date(targetDate);
+      endOfDay.setHours(23,59,59,999);
+
+      const existingRecap = await prisma.recapAnak.findFirst({
+        where: {
+          anakIbuId: anakId,
+          tanggal: {
+            gte: startOfDay,
+            lte: endOfDay
+          }
+        }
+      });
+
+      if (existingRecap) {
+        console.log(`[Idempotency] Anak ${anakId} sudah dicek hari ini (${startOfDay.toLocaleDateString()}). Mengabaikan duplikat.`);
+        return res.status(200).json({ message: "Data kesehatan untuk hari ini sudah berhasil disimpan sebelumnya. Gunakan Edit jika ada kesalahan." });
+      }
+    }
+
     // Ubah ke float, jangan string (toFixed(1) mengembalikan string)
     const newBeratBadanFloat = parseFloat(beratBadan);
     const newTinggiBadanFloat = parseFloat(tinggiBadan);
@@ -868,7 +936,6 @@ const addRecapAnak = async (req, res) => {
           riwayat: riwayatAnemia,
           konjungtiva: konjungtivitaNormal,
           kuku: kukuBersih,
-          tampakPucat: tampakPucat,
         }),
       });
 
@@ -1196,6 +1263,289 @@ const getBatchAllAnak = async (req, res) => {
   }
 };
 
+const editRecapAnakIbu = async (req, res) => {
+  try {
+    const { id } = req.params; // kodeRecap
+    const {
+      beratBadan,
+      tinggiBadan,
+      konjungtivitaNormal,
+      kukuBersih,
+      tampakLemas,
+      tampakPucat,
+      riwayatAnemia,
+    } = req.body;
+
+    if (!id) return res.status(400).json({ error: "ID is required." });
+
+    // Cek keberadaan recap
+    const recap = await prisma.recapAnak.findUnique({
+      where: { kodeRecap: id },
+      include: { anakIbu: true }
+    });
+
+    if (!recap) return res.status(404).json({ error: "Recap not found." });
+
+    // Validasi 7 hari
+    const recapDate = new Date(recap.tanggal);
+    const today = new Date();
+    const diffTime = Math.abs(today - recapDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays > 7) {
+      return res.status(400).json({ error: "Data ini sudah lewat 7 hari dan tidak dapat diedit lagi." });
+    }
+
+    // Validasi data terbaru
+    const latestRecap = await prisma.recapAnak.findFirst({
+      where: { anakIbuId: recap.anakIbuId },
+      orderBy: { tanggal: 'desc' },
+    });
+
+    if (latestRecap.kodeRecap !== id) {
+      return res.status(400).json({ error: "Hanya riwayat terbaru yang dapat diedit." });
+    }
+
+    const newBeratBadanFloat = parseFloat(beratBadan);
+    const newTinggiBadanFloat = parseFloat(tinggiBadan);
+    const anakIbu = recap.anakIbu;
+
+    // --- 1. Panggil API Anemia ---
+    let isAnemic;
+    try {
+      const anemiaResponse = await fetch(`${process.env.ML_API_URL}/anemia`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lemas: tampakLemas,
+          riwayat: riwayatAnemia,
+          konjungtiva: konjungtivitaNormal,
+          kuku: kukuBersih,
+        }),
+      });
+      if (!anemiaResponse.ok) throw new Error("Anemia API Error");
+      isAnemic = await anemiaResponse.json();
+    } catch (e) {
+      return res.status(500).json({ error: "Failed calling anemia API" });
+    }
+
+    // --- 2. Panggil API Stunting ---
+    let stuntingStatus;
+    try {
+      const stuntingResponse = await fetch(`${process.env.ML_API_URL}/stunting`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          usiaBulan: recap.usia,
+          tinggi: newTinggiBadanFloat,
+          kelamin: anakIbu.jenisKelamin === 'Laki-laki' ? 'l' : 'p',
+        }),
+      });
+      if (!stuntingResponse.ok) throw new Error("Stunting API Error");
+      stuntingStatus = await stuntingResponse.json();
+      if (stuntingStatus === "Sangat Pendek") stuntingStatus = "SangatPendek";
+    } catch (e) {
+      return res.status(500).json({ error: "Failed calling stunting API" });
+    }
+
+    // --- 3. Panggil API Z-score ---
+    let zscore;
+    try {
+      const zResponse = await fetch(`${process.env.ML_API_URL}/zscore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          usiaBulan: recap.usia,
+          tinggi: newTinggiBadanFloat,
+          kelamin: anakIbu.jenisKelamin === 'Laki-laki' ? 'l' : 'p',
+        }),
+      });
+      if (!zResponse.ok) throw new Error("ZScore API Error");
+      zscore = await zResponse.json();
+    } catch (e) {
+      return res.status(500).json({ error: "Failed calling zscore API" });
+    }
+
+    // Update Recap
+    const updatedRecap = await prisma.recapAnak.update({
+      where: { kodeRecap: id },
+      data: {
+        beratBadan: newBeratBadanFloat,
+        tinggiBadan: newTinggiBadanFloat,
+        konjungtivitasNormal: konjungtivitaNormal,
+        kukuBersih: kukuBersih,
+        tampakLemas: tampakLemas,
+        tampakPucat: tampakPucat,
+        riwayatAnemia: riwayatAnemia,
+        anemia: isAnemic,
+        stunting: stuntingStatus,
+      }
+    });
+
+    // Update AnakIbu
+    await prisma.anakIbu.update({
+      where: { id: anakIbu.id },
+      data: {
+        anemia: isAnemic,
+        stunting: stuntingStatus,
+        beratBadan: newBeratBadanFloat,
+        tinggiBadan: newTinggiBadanFloat,
+        zscore: zscore,
+      }
+    });
+
+    res.status(200).json({ message: "Data berhasil diedit.", updatedRecap });
+
+  } catch (error) {
+    console.error("Error editing recap:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+const tambahRecapAnakOlehKader = async (req, res) => {
+  try {
+    const {
+      anakId,
+      tanggal,
+      usia,
+      beratBadan,
+      tinggiBadan,
+      konjungtivitaNormal,
+      kukuBersih,
+      tampakLemas,
+      tampakPucat,
+      riwayatAnemia,
+    } = req.body;
+
+    const newBeratBadanFloat = parseFloat(beratBadan);
+    const newTinggiBadanFloat = parseFloat(tinggiBadan);
+
+    const anakRecord = await prisma.anakIbu.findUnique({
+      where: { id: anakId },
+      include: { ibu: true }
+    });
+
+    if (!anakRecord) return res.status(404).json({ error: "Anak not found" });
+
+    // --- 1. Panggil API Anemia ---
+    let isAnemic;
+    try {
+      const anemiaResponse = await fetch(`${process.env.ML_API_URL}/anemia`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lemas: tampakLemas,
+          riwayat: riwayatAnemia,
+          konjungtiva: konjungtivitaNormal,
+          kuku: kukuBersih,
+        }),
+      });
+      if (!anemiaResponse.ok) throw new Error("Anemia API Error");
+      isAnemic = await anemiaResponse.json();
+    } catch (e) {
+      return res.status(500).json({ error: "Failed calling anemia API" });
+    }
+
+    // --- 2. Panggil API Stunting ---
+    let stuntingStatus;
+    try {
+      const stuntingResponse = await fetch(`${process.env.ML_API_URL}/stunting`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          usiaBulan: usia,
+          tinggi: newTinggiBadanFloat,
+          kelamin: anakRecord.jenisKelamin === 'Laki-laki' ? 'l' : 'p',
+        }),
+      });
+      if (!stuntingResponse.ok) throw new Error("Stunting API Error");
+      stuntingStatus = await stuntingResponse.json();
+      if (stuntingStatus === "Sangat Pendek") stuntingStatus = "SangatPendek";
+    } catch (e) {
+      return res.status(500).json({ error: "Failed calling stunting API" });
+    }
+
+    // --- 3. Panggil API Z-score ---
+    let zscore;
+    try {
+      const zResponse = await fetch(`${process.env.ML_API_URL}/zscore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          usiaBulan: usia,
+          tinggi: newTinggiBadanFloat,
+          kelamin: anakRecord.jenisKelamin === 'Laki-laki' ? 'l' : 'p',
+        }),
+      });
+      if (!zResponse.ok) throw new Error("ZScore API Error");
+      zscore = await zResponse.json();
+    } catch (e) {
+      return res.status(500).json({ error: "Failed calling zscore API" });
+    }
+
+    const imt = (newBeratBadanFloat / Math.pow(newTinggiBadanFloat / 100, 2)).toFixed(2);
+    const rekomendasiPlaceholder = `## Informasi Umum
+- Nama Anak: ${anakRecord.nama}
+- Jenis Kelamin: ${anakRecord.jenisKelamin}
+- Usia: ${usia} bulan
+- Berat Badan: ${newBeratBadanFloat} kg
+- Tinggi Badan: ${newTinggiBadanFloat} cm
+- Ibu: ${anakRecord.ibu.nama}
+
+## Analisis Pertumbuhan
+Berdasarkan data yang diberikan, anak berusia ${usia} bulan dengan berat badan ${newBeratBadanFloat} kg dan tinggi badan ${newTinggiBadanFloat} cm menunjukkan:
+- Indeks Massa Tubuh (IMT): ${imt}
+- Stunting: Tinggi badan anak berada dalam kategori ${stuntingStatus}.
+
+## Rekomendasi
+- *(Analisis cerdas sedang diproses. Silakan refresh aplikasi nanti untuk melihat rekomendasi gizi lengkap dari AI).*
+
+## Analisis Anemia
+- Status Anemia: ${isAnemic ? 'Terindikasi anemia. Perlu perhatian khusus.' : 'Tidak ada anemia terdeteksi. Ini adalah kabar baik.'}
+
+## Analisis Kebersihan & Kondisi Fisik
+- Kuku: ${kukuBersih ? 'Bersih' : 'Tidak bersih'}
+- Konjungtiva: ${konjungtivitaNormal ? 'Normal' : 'Tidak normal'}`;
+
+    const anakIbuData = {
+      anakIbuId: anakId,
+      tanggal: new Date(tanggal),
+      beratBadan: newBeratBadanFloat,
+      tinggiBadan: newTinggiBadanFloat,
+      usia: usia,
+      anemia: isAnemic,
+      stunting: stuntingStatus,
+      konjungtivitasNormal: konjungtivitaNormal,
+      kukuBersih: kukuBersih,
+      riwayatAnemia: riwayatAnemia,
+      tampakLemas: tampakLemas,
+      tampakPucat: tampakPucat,
+      rekomendasi: rekomendasiPlaceholder,
+    };
+
+    const newRecap = await prisma.recapAnak.create({ data: anakIbuData });
+
+    // OPTION A: Set cekMingguan to false, locking the Ibu from doing her own check
+    await prisma.anakIbu.update({
+      where: { id: anakId },
+      data: {
+        anemia: isAnemic,
+        stunting: stuntingStatus,
+        beratBadan: newBeratBadanFloat,
+        tinggiBadan: newTinggiBadanFloat,
+        zscore: zscore,
+        cekMingguan: false, // LOCK IBU
+      },
+    });
+
+    res.status(201).json({ message: "Anak checked by Kader successfully", anakIbu: newRecap });
+
+  } catch (error) {
+    console.error("Error in tambahRecapAnakOlehKader:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
 module.exports = {
   getIbu,
   editIbu,
@@ -1213,6 +1563,7 @@ module.exports = {
   getAllArticle,
   getArticlebyId,
   resetIbuRumahChecks,
-
   getBatchAllAnak,
+  editRecapAnakIbu,
+  tambahRecapAnakOlehKader,
 };

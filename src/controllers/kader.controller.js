@@ -1,6 +1,5 @@
 // controllers/user.controller.js
 
-const { PrismaClient } = require("@prisma/client");
 const ClientError = require("../errors/ClientError");
 const { createClient } = require('@supabase/supabase-js');
 // const bcrypt = require('bcryptjs'); // Tidak perlu lagi jika Supabase yang menghash
@@ -25,7 +24,7 @@ const supabaseAdmin = createClient(
   }
 );
 
-const prisma = new PrismaClient();
+const prisma = require('../db');
 
 
 const getKader = async (req, res) => {
@@ -49,18 +48,21 @@ const getKader = async (req, res) => {
       return res.status(404).json({ error: "Kader not found." });
     }
 
-    if (kader.posyanduId && kader.posyandu) {
-      kader.provinsi = kader.posyandu.provinsi || kader.provinsi;
-      kader.kota = kader.posyandu.kota || kader.kota;
+    const responseKader = { ...kader };
+    if (responseKader.posyanduId && responseKader.posyandu) {
+      responseKader.provinsi = responseKader.posyandu.provinsi || responseKader.provinsi;
+      responseKader.kota = responseKader.posyandu.kota || responseKader.kota;
+      responseKader.tinjauan = responseKader.posyandu.tinjauan;
+      responseKader.rekomendasi = responseKader.posyandu.rekomendasi;
     }
-    delete kader.posyandu;
+    delete responseKader.posyandu;
 
     // If kader is found, send it as a JSON response
-    res.status(200).json(kader);
+    res.status(200).json(responseKader);
 
   } catch (error) {
     console.error("Error fetching kader:", error); // Log the error for debugging
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: error.message, stack: error.stack });
   }
 };    
 
@@ -169,21 +171,23 @@ const getRecap = async (req, res) => {
 
       allAnakIbuRecaps = uniqueRecaps.map(r => ({
         id: r.kodeRecap, 
-        nama: r.anakIbu.nama,
-        namaIbu: r.anakIbu.ibu.nama,
+        nama: r.anakIbu?.nama || 'Anak',
+        namaIbu: r.anakIbu?.ibu?.nama || 'Ibu Tidak Diketahui',
         usia: r.usia,
         beratBadan: r.beratBadan,
         tinggiBadan: r.tinggiBadan,
         anemia: r.anemia,
         stunting: r.stunting,
-        jenisKelamin: r.anakIbu.jenisKelamin,
+        jenisKelamin: r.anakIbu?.jenisKelamin || 'Laki-laki',
         tanggal: r.tanggal,
         konjungtivitaNormal: r.konjungtivitasNormal,
         kukuBersih: r.kukuBersih,
         tampakLemas: r.tampakLemas,
         tampakPucat: r.tampakPucat,
         riwayatAnemia: r.riwayatAnemia,
-        kaderEmail: email 
+        kaderEmail: email,
+        anakId: r.anakIbuId,
+        isAnakIbu: true
       }));
     }
 
@@ -193,7 +197,7 @@ const getRecap = async (req, res) => {
     res.status(200).json(combinedRecap.length > 0 ? combinedRecap : { message: "No recap found for this kader." });
   } catch (error) {
     console.error("Error fetching recap:", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: error.message, stack: error.stack });
   }
 }
 
@@ -271,7 +275,6 @@ const unggahAnak = async (req, res) => {
           riwayat: riwayatAnemia,
           konjungtiva: konjungtivitaNormal,
           kuku: kukuBersih,
-          tampakPucat: tampakPucat,
         }),
       });
 
@@ -418,7 +421,6 @@ const editAnak = async (req, res) => {
           riwayat: riwayatAnemia,
           konjungtiva: konjungtivitaNormal,
           kuku: kukuBersih,
-          tampakPucat: tampakPucat,
         }),
       });
 

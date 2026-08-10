@@ -1,6 +1,5 @@
 const OpenAI = require("openai");
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const prisma = require('../db');
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -41,151 +40,7 @@ const getThreeMonthsRange = (currentDate) => {
   };
 };
 
-// =========================================================================
-// CONTROLLER BARU: ANALISIS KADER (PEMBARUAN DENGAN PRISMA UPDATE)
-// =========================================================================
-const getAnalisisKader = async (req, res) => {
-  try {
-    // Asumsi idKader yang dilewatkan adalah primary key (Kader.id)
-    const { idKader } = req.params;
-
-    if (!idKader) {
-      return res.status(400).json({ error: "ID Kader is required." });
-    }
-
-    // 1. Tentukan rentang waktu
-    const today = new Date();
-    const { start, end, currentMonthRange, previousMonthsRange } = getThreeMonthsRange(today);
-    
-    // 2. Ambil data recap anak 3 bulan terakhir di bawah kader ini
-    // Perhatikan: AnakIbu harus memiliki relasi ke Kader, menggunakan 'email' Kader sebagai kuncinya
-    // Asumsi: Di model AnakIbu/RecapAnak, Anda dapat menelusuri ke Kader menggunakan join implisit Prisma.
-    // Jika Kader dihubungkan ke AnakIbu melalui ID Kader, pastikan relasinya sudah benar.
-    
-    // Karena Kader dihubungkan ke User melalui email, dan AnakIbu/RecapAnak tidak langsung ke Kader,
-    // kita asumsikan ada field di AnakIbu yang menunjuk ke Kader, atau Kader email
-    // Berdasarkan skema, Kader terhubung ke AnakKader, dan AnakIbu tidak langsung ke Kader.
-    // Namun, karena kode sebelumnya menggunakan AnakIbu yang terhubung ke Kader, saya akan
-    // menyesuaikan query agar Kader dicari melalui AnakKader.
-
-    const kaderData = await prisma.kader.findUnique({
-      where: { id: idKader },
-      select: { email: true }
-    });
-    
-    if (!kaderData) {
-        return res.status(404).json({ error: "Kader not found." });
-    }
-    
-    // Ambil semua data recap dari anak-anak yang terdaftar di AnakKader milik kader ini
-    const allRecaps = await prisma.anakKader.findMany({
-      where: {
-        kaderEmail: kaderData.email,
-        tanggal: {
-          gte: start,
-          lte: end,
-        },
-      },
-      select: {
-        tanggal: true,
-        stunting: true,
-        anemia: true,
-      },
-      orderBy: { tanggal: 'desc' },
-    });
-
-
-    // 3. Hitung jumlah kasus Stunting dan Anemia
-    let currentMonthStunting = 0;
-    let currentMonthAnemia = 0;
-    let previousMonthsStunting = 0;
-    let previousMonthsAnemia = 0;
-    
-    // Hitung per kejadian recap (AnakKader)
-    allRecaps.forEach(recap => {
-        if (recap.tanggal >= currentMonthRange.start && recap.tanggal <= currentMonthRange.end) {
-            // Data Bulan Saat Ini
-            // Enum StuntingType: 'SangatPendek', 'Pendek', 'Normal', 'Tinggi'
-            if (recap.stunting === 'SangatPendek' || recap.stunting === 'Pendek') currentMonthStunting++;
-            if (recap.anemia) currentMonthAnemia++;
-        } else if (recap.tanggal >= previousMonthsRange.start && recap.tanggal <= previousMonthsRange.end) {
-            // Data 2 Bulan Sebelumnya
-            if (recap.stunting === 'SangatPendek' || recap.stunting === 'Pendek') previousMonthsStunting++;
-            if (recap.anemia) previousMonthsAnemia++;
-        }
-    });
-
-    // 4. Buat objek data untuk LLM
-    const analisisData = {
-        rentangWaktu: `${previousMonthsRange.start.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })} - ${currentMonthRange.end.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`,
-        dataBulanIni: {
-            periode: `${currentMonthRange.start.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`,
-            stunting: currentMonthStunting,
-            anemia: currentMonthAnemia,
-        },
-        dataDuaBulanSebelumnya: {
-            periode: `${previousMonthsRange.start.toLocaleDateString('id-ID', { month: 'long' })} - ${new Date(currentMonthRange.start - 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`,
-            stunting: previousMonthsStunting,
-            anemia: previousMonthsAnemia,
-        },
-    };
-
-    // 5. Buat prompt GPT
-    const prompt = `
-Anda adalah seorang koordinator kesehatan masyarakat yang bertugas menganalisis data balita dari kader posyandu.
-
-Tugas Anda:
-1. **Rangkum** data kasus stunting (kategori Pendek dan Sangat Pendek) dan anemia pada bulan terkini.
-2. **Bandingkan** kasus bulan terkini dengan total kasus 2 bulan sebelumnya (bandingkan jumlah stunting dan anemia secara terpisah).
-3. Tentukan apakah terjadi **penurunan** atau **kenaikan** kasus untuk Stunting dan Anemia.
-4. Berikan **Analisis Mendalam** mengenai tren yang terjadi (penurunan/kenaikan).
-5. Berikan **Rekomendasi Strategis** yang spesifik dan praktis untuk Kader di wilayah ini, fokus pada:
-   - Tindakan pencegahan Stunting dan Anemia.
-   - Peningkatan edukasi kepada orang tua.
-   - Optimalisasi monitoring dan kunjungan rumah.
-6. Gunakan format **Markdown** yang rapi:
-    - ## Ringkasan Data Kesehatan
-    - ## Perbandingan Kasus 3 Bulan Terakhir
-    - ## Analisis Tren
-    - ## Rekomendasi Strategis untuk Kader
-
-Data Analisis Kasus (dihitung berdasarkan kejadian recap dalam rentang waktu):
-${JSON.stringify(analisisData, null, 2)}
-`;
-
-    // 6. Panggil GPT
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "Anda adalah koordinator kesehatan masyarakat ahli data dan strategi." },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.6,
-    });
-
-    const analisisKader = completion.choices[0].message.content;
-
-    // 7. SIMPAN HASIL GPT KE KOLOM 'tinjauan' DI TABEL KADER
-    const updatedKader = await prisma.kader.update({
-        where: { id: idKader }, // Menggunakan ID Kader untuk update
-        data: { 
-            tinjauan: analisisKader,
-            rekomendasi: new Date() // Opsional: Update timestamp rekomendasi
-        },
-        select: { id: true, tinjauan: true, rekomendasi: true }
-    });
-
-    res.status(200).json({
-      message: "Analisis kesehatan kader berhasil dibuat dan disimpan di kolom tinjauan.",
-      analisisData,
-      rekomendasi: analisisKader,
-      kader: updatedKader
-    });
-  } catch (error) {
-    console.error("Error GPT Analisis Kader:", error);
-    res.status(500).json({ error: "Gagal menghasilkan analisis kader." });
-  }
-};
+// (getAnalisisKader endpoint removed since frontend doesn't use it directly and we moved to Posyandu)
 
 
 // =========================================================================
@@ -409,82 +264,73 @@ Hasil markdown harus mudah dibaca & bisa langsung dipakai di Flutter.
 };
 
 
-// Controller untuk batch analisis semua kader
-const runBatchAnalisisKader = async (req, res) => {
+// Controller untuk batch analisis semua posyandu
+const runBatchAnalisisPosyandu = async (req, res) => {
   try {
-    console.log("=== Memulai Batch Analisis untuk Semua Kader ===");
+    console.log("=== Memulai Batch Analisis untuk Semua Posyandu ===");
     
-    // 1. Ambil semua kader yang ada
-    const allKaders = await prisma.kader.findMany({
+    // 1. Ambil semua posyandu yang ada
+    const allPosyandus = await prisma.posyandu.findMany({
       select: {
         id: true,
-        email: true,
         namaPosyandu: true,
       },
     });
 
-    if (!allKaders || allKaders.length === 0) {
+    if (!allPosyandus || allPosyandus.length === 0) {
       return res.status(404).json({ 
-        error: "Tidak ada kader yang ditemukan.",
+        error: "Tidak ada posyandu yang ditemukan.",
         processedCount: 0 
       });
     }
 
-    console.log(`Ditemukan ${allKaders.length} kader untuk dianalisis`);
+    console.log(`Ditemukan ${allPosyandus.length} posyandu untuk dianalisis`);
 
     const results = {
-      total: allKaders.length,
+      total: allPosyandus.length,
       success: [],
       failed: [],
       skipped: [],
     };
 
-    // 2. Loop untuk setiap kader
-    for (const kader of allKaders) {
+    // 2. Loop untuk setiap posyandu
+    for (const posyandu of allPosyandus) {
       try {
-        console.log(`\nMemproses Kader: ${kader.namaPosyandu} (${kader.id})`);
+        console.log(`\nMemproses Posyandu: ${posyandu.namaPosyandu} (${posyandu.id})`);
 
-        // Jalankan analisis untuk kader ini
-        const analisisResult = await generateAnalisisForKader(kader.id, kader.email);
+        // Jalankan analisis untuk posyandu ini
+        const analisisResult = await generateAnalisisForPosyandu(posyandu.id, posyandu.namaPosyandu);
 
         if (analisisResult.success) {
           results.success.push({
-            id: kader.id,
-            email: kader.email,
-            namaPosyandu: kader.namaPosyandu,
+            id: posyandu.id,
+            namaPosyandu: posyandu.namaPosyandu,
             message: analisisResult.message,
           });
-          console.log(`✓ Berhasil: ${kader.namaPosyandu}`);
+          console.log(`✓ Berhasil: ${posyandu.namaPosyandu}`);
         } else {
           results.skipped.push({
-            id: kader.id,
-            email: kader.email,
-            namaPosyandu: kader.namaPosyandu,
+            id: posyandu.id,
+            namaPosyandu: posyandu.namaPosyandu,
             reason: analisisResult.message,
           });
-          console.log(`⊘ Dilewati: ${kader.namaPosyandu} - ${analisisResult.message}`);
+          console.log(`⊘ Dilewati: ${posyandu.namaPosyandu} - ${analisisResult.message}`);
         }
       } catch (error) {
-        console.error(`✗ Error pada Kader ${kader.namaPosyandu}:`, error.message);
+        console.error(`✗ Error pada Posyandu ${posyandu.namaPosyandu}:`, error.message);
         results.failed.push({
-          id: kader.id,
-          email: kader.email,
-          namaPosyandu: kader.namaPosyandu,
+          id: posyandu.id,
+          namaPosyandu: posyandu.namaPosyandu,
           error: error.message,
         });
       }
     }
 
     console.log("\n=== Batch Analisis Selesai ===");
-    console.log(`Total: ${results.total}`);
-    console.log(`Berhasil: ${results.success.length}`);
-    console.log(`Dilewati: ${results.skipped.length}`);
-    console.log(`Gagal: ${results.failed.length}`);
-
     res.status(200).json({
-      message: "Batch analisis kader selesai dijalankan.",
+      message: "Batch analisis posyandu selesai dijalankan.",
       summary: {
-        totalKader: results.total,
+        totalPosyandu: results.total,
         berhasil: results.success.length,
         dilewati: results.skipped.length,
         gagal: results.failed.length,
@@ -493,47 +339,59 @@ const runBatchAnalisisKader = async (req, res) => {
       timestamp: new Date(),
     });
   } catch (error) {
-    console.error("Error Batch Analisis Kader:", error);
+    console.error("Error Batch Analisis Posyandu:", error);
     res.status(500).json({ 
-      error: "Gagal menjalankan batch analisis kader.",
+      error: "Gagal menjalankan batch analisis posyandu.",
       detail: error.message 
     });
   }
 };
 
-// Fungsi helper untuk generate analisis per kader
-const generateAnalisisForKader = async (idKader, kaderEmail) => {
+// Fungsi helper untuk generate analisis per posyandu
+const generateAnalisisForPosyandu = async (idPosyandu, namaPosyandu) => {
   try {
     // 1. Tentukan rentang waktu
     const today = new Date();
     const { start, end, currentMonthRange, previousMonthsRange } = getThreeMonthsRange(today);
     
-    // 2. Ambil semua data recap dari anak-anak yang terdaftar di AnakKader milik kader ini
-    const allRecaps = await prisma.anakKader.findMany({
+    // 2. Ambil data AnakKader yang terkait dengan Posyandu ini
+    const kadersInPosyandu = await prisma.kader.findMany({
+      where: { posyanduId: idPosyandu },
+      select: { email: true }
+    });
+    const kaderEmails = kadersInPosyandu.map(k => k.email);
+
+    const anakKaderRecaps = await prisma.anakKader.findMany({
       where: {
-        kaderEmail: kaderEmail,
-        tanggal: {
-          gte: start,
-          lte: end,
-        },
+        kaderEmail: { in: kaderEmails },
+        tanggal: { gte: start, lte: end },
       },
-      select: {
-        tanggal: true,
-        stunting: true,
-        anemia: true,
-      },
-      orderBy: { tanggal: 'desc' },
+      select: { tanggal: true, stunting: true, anemia: true },
     });
 
-    // Jika tidak ada data, skip kader ini
+    // 3. Ambil data RecapAnak dari IbuRumah di Posyandu ini
+    const ibuInPosyandu = await prisma.ibuRumah.findMany({
+      where: { posyanduId: idPosyandu },
+      select: { email: true }
+    });
+    const ibuEmails = ibuInPosyandu.map(i => i.email);
+
+    const recapAnakData = await prisma.recapAnak.findMany({
+      where: {
+        anakIbu: { ibuEmail: { in: ibuEmails } },
+        tanggal: { gte: start, lte: end },
+      },
+      select: { tanggal: true, stunting: true, anemia: true },
+    });
+
+    const allRecaps = [...anakKaderRecaps, ...recapAnakData];
+
+    // Jika tidak ada data, skip posyandu ini
     if (allRecaps.length === 0) {
-      return {
-        success: false,
-        message: "Tidak ada data recap dalam 3 bulan terakhir"
-      };
+      return { success: false, message: "Tidak ada data recap dalam 3 bulan terakhir" };
     }
 
-    // 3. Hitung jumlah kasus Stunting dan Anemia
+    // Hitung jumlah kasus Stunting dan Anemia
     let currentMonthStunting = 0;
     let currentMonthAnemia = 0;
     let previousMonthsStunting = 0;
@@ -549,7 +407,6 @@ const generateAnalisisForKader = async (idKader, kaderEmail) => {
       }
     });
 
-    // 4. Buat objek data untuk LLM
     const analisisData = {
       rentangWaktu: `${previousMonthsRange.start.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })} - ${currentMonthRange.end.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`,
       dataBulanIni: {
@@ -564,16 +421,15 @@ const generateAnalisisForKader = async (idKader, kaderEmail) => {
       },
     };
 
-    // 5. Buat prompt GPT
     const prompt = `
-Anda adalah seorang koordinator kesehatan masyarakat yang bertugas menganalisis data balita dari kader posyandu.
+Anda adalah seorang koordinator kesehatan masyarakat yang bertugas menganalisis data balita di Posyandu ${namaPosyandu}.
 
 Tugas Anda:
 1. **Rangkum** data kasus stunting (kategori Pendek dan Sangat Pendek) dan anemia pada bulan terkini.
 2. **Bandingkan** kasus bulan terkini dengan total kasus 2 bulan sebelumnya (bandingkan jumlah stunting dan anemia secara terpisah).
 3. Tentukan apakah terjadi **penurunan** atau **kenaikan** kasus untuk Stunting dan Anemia.
 4. Berikan **Analisis Mendalam** mengenai tren yang terjadi (penurunan/kenaikan).
-5. Berikan **Rekomendasi Strategis** yang spesifik dan praktis untuk Kader di wilayah ini, fokus pada:
+5. Berikan **Rekomendasi Strategis** yang spesifik dan praktis untuk Posyandu di wilayah ini, fokus pada:
    - Tindakan pencegahan Stunting dan Anemia.
    - Peningkatan edukasi kepada orang tua.
    - Optimalisasi monitoring dan kunjungan rumah.
@@ -581,13 +437,12 @@ Tugas Anda:
     - ## Ringkasan Data Kesehatan
     - ## Perbandingan Kasus 3 Bulan Terakhir
     - ## Analisis Tren
-    - ## Rekomendasi Strategis untuk Kader
+    - ## Rekomendasi Strategis untuk Posyandu
 
 Data Analisis Kasus (dihitung berdasarkan kejadian recap dalam rentang waktu):
 ${JSON.stringify(analisisData, null, 2)}
 `;
 
-    // 6. Panggil GPT
     const completion = await client.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -597,90 +452,61 @@ ${JSON.stringify(analisisData, null, 2)}
       temperature: 0.6,
     });
 
-    const analisisKader = completion.choices[0].message.content;
+    const analisisPosyandu = completion.choices[0].message.content;
 
-    // 7. Simpan hasil GPT ke kolom 'tinjauan' di tabel Kader
-    await prisma.kader.update({
-      where: { id: idKader },
+    // Simpan hasil GPT ke kolom 'tinjauan' di tabel Posyandu
+    await prisma.posyandu.update({
+      where: { id: idPosyandu },
       data: { 
-        tinjauan: analisisKader,
+        tinjauan: analisisPosyandu,
         rekomendasi: new Date()
       },
     });
 
-    return {
-      success: true,
-      message: "Analisis berhasil dibuat dan disimpan"
-    };
+    return { success: true, message: "Analisis berhasil dibuat dan disimpan" };
   } catch (error) {
     throw error;
   }
 };
 
-// Fungsi untuk cron job (tanpa req/res)
+// Fungsi untuk cron job
 const runScheduledBatchAnalisis = async () => {
   try {
     console.log("=== [CRON] Memulai Batch Analisis Terjadwal ===");
     
-    const allKaders = await prisma.kader.findMany({
-      select: {
-        id: true,
-        email: true,
-        namaPosyandu: true,
-      },
+    const allPosyandus = await prisma.posyandu.findMany({
+      select: { id: true, namaPosyandu: true },
     });
 
-    if (!allKaders || allKaders.length === 0) {
-      console.log("Tidak ada kader yang ditemukan.");
-      return { success: false, message: "Tidak ada kader" };
+    if (!allPosyandus || allPosyandus.length === 0) {
+      console.log("Tidak ada posyandu yang ditemukan.");
+      return { success: false, message: "Tidak ada posyandu" };
     }
 
-    console.log(`Ditemukan ${allKaders.length} kader untuk dianalisis`);
-
     const results = {
-      total: allKaders.length,
+      total: allPosyandus.length,
       success: [],
       failed: [],
       skipped: [],
     };
 
-    for (const kader of allKaders) {
+    for (const posyandu of allPosyandus) {
       try {
-        console.log(`\nMemproses Kader: ${kader.namaPosyandu} (${kader.id})`);
-        const analisisResult = await generateAnalisisForKader(kader.id, kader.email);
+        const analisisResult = await generateAnalisisForPosyandu(posyandu.id, posyandu.namaPosyandu);
 
         if (analisisResult.success) {
-          results.success.push({
-            id: kader.id,
-            namaPosyandu: kader.namaPosyandu,
-          });
-          console.log(`✓ Berhasil: ${kader.namaPosyandu}`);
+          results.success.push({ id: posyandu.id, namaPosyandu: posyandu.namaPosyandu });
         } else {
-          results.skipped.push({
-            id: kader.id,
-            namaPosyandu: kader.namaPosyandu,
-            reason: analisisResult.message,
-          });
-          console.log(`⊘ Dilewati: ${kader.namaPosyandu}`);
+          results.skipped.push({ id: posyandu.id, namaPosyandu: posyandu.namaPosyandu, reason: analisisResult.message });
         }
       } catch (error) {
-        console.error(`✗ Error pada Kader ${kader.namaPosyandu}:`, error.message);
-        results.failed.push({
-          id: kader.id,
-          namaPosyandu: kader.namaPosyandu,
-          error: error.message,
-        });
+        results.failed.push({ id: posyandu.id, namaPosyandu: posyandu.namaPosyandu, error: error.message });
       }
     }
 
-    console.log("\n=== [CRON] Batch Analisis Selesai ===");
-    console.log(`Berhasil: ${results.success.length}, Dilewati: ${results.skipped.length}, Gagal: ${results.failed.length}`);
+    console.log(`[CRON] Selesai - Berhasil: ${results.success.length}, Dilewati: ${results.skipped.length}, Gagal: ${results.failed.length}`);
 
-    return {
-      success: true,
-      summary: results,
-      timestamp: new Date(),
-    };
+    return { success: true, summary: results, timestamp: new Date() };
   } catch (error) {
     console.error("[CRON] Error Batch Analisis:", error);
     return { success: false, error: error.message };
@@ -691,7 +517,6 @@ module.exports = {
     getAnalisisSanitasi, 
     getAnalisisGizi, 
     getAnalisisMakanan, 
-    getAnalisisKader,
-    runBatchAnalisisKader,
+    runBatchAnalisisPosyandu,
     runScheduledBatchAnalisis,  
 };
