@@ -34,24 +34,24 @@ app.use(NotFoundMiddleware);
 app.use(ErrorHandlerMiddleware);
 
 cron.schedule('0 0 * * *', () => {
-    console.log(`[CRON] Menjalankan pengecekan reset terjadwal pada: ${new Date().toISOString()}`);
-    resetIbuRumahChecks();
+  console.log(`[CRON] Menjalankan pengecekan reset terjadwal pada: ${new Date().toISOString()}`);
+  resetIbuRumahChecks();
 }, {
-    timezone: "Asia/Jakarta" // Pastikan menggunakan zona waktu yang benar
+  timezone: "Asia/Jakarta" // Pastikan menggunakan zona waktu yang benar
 });
 
 cron.schedule('00 00 1 * *', async () => {
   console.log('\n📅 [CRON SCHEDULER] Triggered: Batch Analisis Kader');
   console.log(`Waktu: ${new Date().toLocaleString('id-ID')}`);
-  
+
   try {
     const result = await runScheduledBatchAnalisis();
-    
+
     if (result.success) {
       console.log('✅ [CRON SCHEDULER] Batch analisis selesai dengan sukses');
-      console.log(`   - Berhasil: ${result.summary.success.length}`); 
-      console.log(`   - Dilewati: ${result.summary.skipped.length}`); 
-      console.log(`   - Gagal: ${result.summary.failed.length}`); 
+      console.log(`   - Berhasil: ${result.summary.success.length}`);
+      console.log(`   - Dilewati: ${result.summary.skipped.length}`);
+      console.log(`   - Gagal: ${result.summary.failed.length}`);
     } else {
       console.error('❌ [CRON SCHEDULER] Batch analisis gagal:', result.error || result.message);
     }
@@ -73,10 +73,33 @@ cron.schedule('0 2 * * *', async () => {
 });
 
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
-  
+
   // Lakukan pengecekan jadwal reset saat server pertama kali menyala (Wake-up Check)
   console.log(`[BOOT] Memeriksa jadwal reset IbuRumah...`);
   resetIbuRumahChecks();
+});
+
+process.once('SIGUSR2', () => {
+  server.close(() => {
+    console.log('[NODEMON] Menutup port 6500 untuk restart...');
+    process.kill(process.pid, 'SIGUSR2');
+  });
+});
+
+// 2. Menangani saat server dimatikan manual dengan Ctrl+C (SIGINT)
+process.on('SIGINT', () => {
+  server.close(() => {
+    console.log('[SERVER] Server dimatikan, port dilepaskan.');
+    process.exit(0);
+  });
+});
+
+// 3. Menangani termination signal dari sistem operasi (SIGTERM)
+process.on('SIGTERM', () => {
+  server.close(() => {
+    console.log('[SERVER] Proses dihentikan oleh sistem.');
+    process.exit(0);
+  });
 });

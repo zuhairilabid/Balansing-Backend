@@ -1,6 +1,5 @@
 // controllers/user.controller.js
 
-const { PrismaClient } = require("@prisma/client");
 const ClientError = require("../errors/ClientError");
 const { createClient } = require('@supabase/supabase-js');
 // const bcrypt = require('bcryptjs'); // Tidak perlu lagi jika Supabase yang menghash
@@ -14,26 +13,26 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANO
 
 // Supabase Admin Client untuk operasi backend yang membutuhkan hak akses penuh
 const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY, // <--- PERBAIKAN: Gunakan SERVICE_ROLE_KEY
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  }
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY, // <--- PERBAIKAN: Gunakan SERVICE_ROLE_KEY
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  }
 );
 
-const prisma = new PrismaClient();
+const prisma = require('../db');
 
 const generateRandomId = () => {
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  const charactersLength = characters.length;
-  for (let i = 0; i < 10; i++) {
-    result += characters.charAt(Math.floor(Math.random() * charactersLength));
-  }
-  return result;
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  const charactersLength = characters.length;
+  for (let i = 0; i < 10; i++) {
+    result += characters.charAt(Math.floor(Math.random() * charactersLength));
+  }
+  return result;
 };
 
 const registerKader = async (req, res) => {
@@ -79,7 +78,7 @@ const registerKader = async (req, res) => {
 
   try {
     let supabaseUser, supabaseError;
-    
+
     // 1. Membuat user di autentikasi Supabase
     if (email) {
       const result = await supabaseAdmin.auth.admin.createUser({
@@ -100,19 +99,19 @@ const registerKader = async (req, res) => {
       supabaseError = result.error;
     }
 
-    if (supabaseError) {
-      console.error("Supabase registration error:", supabaseError.message);
-      if (supabaseError.message.includes("User already registered")) {
-        return res.status(409).json({ message: 'Email sudah terdaftar.' }); // Pesan lebih umum
-      }
-      return res.status(500).json({ message: 'Gagal mendaftar user di Supabase Auth.', error: supabaseError.message });
-    }
+    if (supabaseError) {
+      console.error("Supabase registration error:", supabaseError.message);
+      if (supabaseError.message.includes("User already registered")) {
+        return res.status(409).json({ message: 'Email sudah terdaftar.' }); // Pesan lebih umum
+      }
+      return res.status(500).json({ message: 'Gagal mendaftar user di Supabase Auth.', error: supabaseError.message });
+    }
 
-    // Pastikan user Supabase berhasil dibuat dan memiliki ID
-    if (!supabaseUser || !supabaseUser.user || !supabaseUser.user.id) {
-        // Ini seharusnya tidak terjadi jika tidak ada supabaseError, tapi sebagai fallback
-        return res.status(500).json({ message: 'Gagal mendapatkan ID user dari Supabase Auth.' });
-    }
+    // Pastikan user Supabase berhasil dibuat dan memiliki ID
+    if (!supabaseUser || !supabaseUser.user || !supabaseUser.user.id) {
+      // Ini seharusnya tidak terjadi jika tidak ada supabaseError, tapi sebagai fallback
+      return res.status(500).json({ message: 'Gagal mendapatkan ID user dari Supabase Auth.' });
+    }
 
     // 2. Membuat data User baru ke database Prisma
     // PENTING: Karena Prisma schema lama mewajibkan email, kita buat dummy HANYA untuk database jika tidak ada email
@@ -139,7 +138,7 @@ const registerKader = async (req, res) => {
       newKader = await prisma.kader.create({
         data: {
           id: generateRandomId(),
-          email: fallbackEmail, 
+          email: fallbackEmail,
           authId: supabaseUser.user.id, // DUAL WRITE FASE 2
           noTelp: noTelp || null,
           posyanduId: posyanduId || null,
@@ -155,30 +154,30 @@ const registerKader = async (req, res) => {
         },
       });
     } catch (prismaKaderError) {
-      console.error("Prisma Kader creation error:", prismaKaderError);
-      // Jika pembuatan Kader di Prisma gagal, hapus user dari Supabase Auth dan Prisma User
-      if (supabaseUser && supabaseUser.user && supabaseUser.user.id) {
-        await supabaseAdmin.auth.admin.deleteUser(supabaseUser.user.id);
-      }
-      // PERBAIKAN: Gunakan email untuk menghapus user dari tabel Prisma
+      console.error("Prisma Kader creation error:", prismaKaderError);
+      // Jika pembuatan Kader di Prisma gagal, hapus user dari Supabase Auth dan Prisma User
+      if (supabaseUser && supabaseUser.user && supabaseUser.user.id) {
+        await supabaseAdmin.auth.admin.deleteUser(supabaseUser.user.id);
+      }
+      // PERBAIKAN: Gunakan email untuk menghapus user dari tabel Prisma
       await prisma.user.delete({ where: { email: fallbackEmail } });
-      return res.status(500).json({ message: 'Gagal membuat data kader di database.', error: prismaKaderError.message });
-    }
+      return res.status(500).json({ message: 'Gagal membuat data kader di database.', error: prismaKaderError.message });
+    }
 
-    res.status(201).json({
-      message: 'Registrasi kader berhasil! Silakan cek email Anda untuk verifikasi (jika diaktifkan).',
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        jenis: newUser.jenis,
-      },
-      kader: newKader,
-    });
+    res.status(201).json({
+      message: 'Registrasi berhasil! Silakan cek email Anda untuk verifikasi.',
+      user: {
+        id: newUser.id,
+        email: newUser.email,
+        jenis: newUser.jenis,
+      },
+      kader: newKader,
+    });
 
-  } catch (error) {
-    console.error("General registration error:", error);
-    res.status(500).json({ message: 'Terjadi kesalahan server.', error: error.message });
-  }
+  } catch (error) {
+    console.error("General registration error:", error);
+    res.status(500).json({ message: 'Terjadi kesalahan server.', error: error.message });
+  }
 };
 
 // --- Perubahan pada fungsi login ---
@@ -211,17 +210,17 @@ const login = async (req, res, next) => {
     const session = data.session;
 
     if (!supabaseUser || !session) {
-        return res.status(401).json({ message: 'Login gagal. Sesi tidak ditemukan.' });
+      return res.status(401).json({ message: 'Login gagal. Sesi tidak ditemukan.' });
     }
 
     // Ambil data user dari tabel Prisma (Mencari berdasarkan ID dari Supabase)
     const userProfile = await prisma.user.findFirst({
-        where: { id: supabaseUser.id }, 
+      where: { id: supabaseUser.id },
     });
 
     if (!userProfile) {
-        console.warn(`User with ID ${supabaseUser.id} found in Supabase Auth but not in Prisma User table.`);
-        return res.status(404).json({ message: 'Data user tidak ditemukan di database aplikasi.' });
+      console.warn(`User with ID ${supabaseUser.id} found in Supabase Auth but not in Prisma User table.`);
+      return res.status(404).json({ message: 'Data user tidak ditemukan di database aplikasi.' });
     }
 
     const secretKey = process.env.JWT_SECRET || 'your_jwt_secret_key';
@@ -233,7 +232,7 @@ const login = async (req, res, next) => {
         jenis: userProfile.jenis,
       },
       secretKey,
-      { expiresIn: '1000h' } 
+      { expiresIn: '1000h' }
     );
 
     res.status(200).json({
@@ -253,62 +252,62 @@ const login = async (req, res, next) => {
 };
 
 const logout = async (req, res) => {
-    // Jika Anda menggunakan Supabase Auth untuk sesi, Anda juga perlu logout dari Supabase
-    try {
-        const { error } = await supabase.auth.signOut(); // Logout dari sesi Supabase
-        if (error) {
-            console.error("Supabase logout error:", error.message);
-            return res.status(500).json({ message: 'Gagal logout dari Supabase.', error: error.message });
-        }
-        res.status(200).json({ message: 'Logout berhasil. Mohon hapus token dari perangkat Anda.' });
-    } catch (err) {
-        console.error("General logout error:", err);
-        res.status(500).json({ error: err.message });
-    }
+  // Jika Anda menggunakan Supabase Auth untuk sesi, Anda juga perlu logout dari Supabase
+  try {
+    const { error } = await supabase.auth.signOut(); // Logout dari sesi Supabase
+    if (error) {
+      console.error("Supabase logout error:", error.message);
+      return res.status(500).json({ message: 'Gagal logout dari Supabase.', error: error.message });
+    }
+    res.status(200).json({ message: 'Logout berhasil. Mohon hapus token dari perangkat Anda.' });
+  } catch (err) {
+    console.error("General logout error:", err);
+    res.status(500).json({ error: err.message });
+  }
 };
 
 
 const requestPasswordReset = async (req, res) => {
-  const { email } = req.body;
+  const { email } = req.body;
 
-  if (!email) {
-    return res.status(400).json({ error: 'Email harus diisi.' });
-  }
+  if (!email) {
+    return res.status(400).json({ error: 'Email harus diisi.' });
+  }
 
-  try {
-    // PERUBAHAN DI SINI: Sesuaikan dengan URL backend Anda
-    const redirectToUrl = 'http://165.22.102.172:6500/api/user/handleresetpassword'; // <--- Ubah ini
+  try {
+    // PERUBAHAN DI SINI: Sesuaikan dengan URL backend Anda
+    const redirectToUrl = 'http://165.22.102.172:6500/api/user/handleresetpassword'; // <--- Ubah ini
 
-    // Gunakan supabaseAdmin untuk mengirim email reset password
-    const { error } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
-      redirectTo: redirectToUrl,
-    });
+    // Gunakan supabaseAdmin untuk mengirim email reset password
+    const { error } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
+      redirectTo: redirectToUrl,
+    });
 
-    if (error) {
-      console.error('Error requesting password reset:', error);
-      return res.status(500).json({ error: 'Terjadi kesalahan saat meminta reset password.' });
-    }
+    if (error) {
+      console.error('Error requesting password reset:', error);
+      return res.status(500).json({ error: 'Terjadi kesalahan saat meminta reset password.' });
+    }
 
-    res.status(200).json({ message: 'Jika email Anda terdaftar, tautan reset password telah dikirim ke email Anda.' });
+    res.status(200).json({ message: 'Jika email Anda terdaftar, tautan reset password telah dikirim ke email Anda.' });
 
-  } catch (err) {
-    console.error('Error in password reset request:', err);
-    res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
-  }
+  } catch (err) {
+    console.error('Error in password reset request:', err);
+    res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
+  }
 };
 
 
 const handleResetPasswordPage = async (req, res) => {
-    // console.log("URL Query Parameters:", req.query); // Anda bisa hapus ini setelah konfirmasi
-    // const { access_token, type } = req.query; // <--- BARIS INI TIDAK AKAN BEKERJA UNTUK HASH FRAGMENT
+  // console.log("URL Query Parameters:", req.query); // Anda bisa hapus ini setelah konfirmasi
+  // const { access_token, type } = req.query; // <--- BARIS INI TIDAK AKAN BEKERJA UNTUK HASH FRAGMENT
 
-    // Kita tidak akan mendapatkan access_token dari req.query di backend karena itu ada di hash fragment.
-    // Kita akan membacanya di JavaScript client-side di dalam HTML.
+  // Kita tidak akan mendapatkan access_token dari req.query di backend karena itu ada di hash fragment.
+  // Kita akan membacanya di JavaScript client-side di dalam HTML.
 
-    // Selalu render form, dan biarkan JavaScript di client-side yang membaca dan memvalidasi token.
-    // Jika token tidak ada/tidak valid, JavaScript akan menampilkan pesan error.
+  // Selalu render form, dan biarkan JavaScript di client-side yang membaca dan memvalidasi token.
+  // Jika token tidak ada/tidak valid, JavaScript akan menampilkan pesan error.
 
-    res.send(`
+  res.send(`
         <!DOCTYPE html>
         <html lang="en">
         <head>
@@ -421,41 +420,41 @@ const handleResetPasswordPage = async (req, res) => {
 
 // Fungsi untuk memperbarui password dari form HTML
 const updatePasswordFromForm = async (req, res) => {
-    const { access_token, refresh_token, newPassword } = req.body;
+  const { access_token, refresh_token, newPassword } = req.body;
 
-    console.log(access_token)
-    console.log(refresh_token)
-    console.log(newPassword)
+  console.log(access_token)
+  console.log(refresh_token)
+  console.log(newPassword)
 
-    if (!access_token || !refresh_token || !newPassword) {
-        return res.status(400).json({ error: 'Token dan password baru harus diisi.' });
+  if (!access_token || !refresh_token || !newPassword) {
+    return res.status(400).json({ error: 'Token dan password baru harus diisi.' });
+  }
+
+  try {
+    // Set session dulu pakai token dari URL reset password
+    const { error: sessionError } = await supabase.auth.setSession({
+      access_token,
+      refresh_token,
+    });
+
+    if (sessionError) {
+      return res.status(400).json({ error: 'Token tidak valid atau sudah kadaluarsa.' });
     }
 
-    try {
-        // Set session dulu pakai token dari URL reset password
-        const { error: sessionError } = await supabase.auth.setSession({
-            access_token,
-            refresh_token,
-        });
+    // Update password
+    const { data, error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
 
-        if (sessionError) {
-            return res.status(400).json({ error: 'Token tidak valid atau sudah kadaluarsa.' });
-        }
-
-        // Update password
-        const { data, error } = await supabase.auth.updateUser({
-            password: newPassword,
-        });
-
-        if (error) {
-            return res.status(400).json({ error: error.message });
-        }
-
-        res.status(200).json({ message: 'Password berhasil diperbarui.' });
-    } catch (err) {
-        console.error('Error in updatePasswordFromForm:', err);
-        res.status(500).json({ error: 'Terjadi kesalahan server.' });
+    if (error) {
+      return res.status(400).json({ error: error.message });
     }
+
+    res.status(200).json({ message: 'Password berhasil diperbarui.' });
+  } catch (err) {
+    console.error('Error in updatePasswordFromForm:', err);
+    res.status(500).json({ error: 'Terjadi kesalahan server.' });
+  }
 };
 
 const changePassword = async (req, res) => {
@@ -496,7 +495,7 @@ const changePassword = async (req, res) => {
 
     if (updateError) {
       console.error("Supabase update password error:", updateError.message);
-      return res.status(500).json({success: false, message: 'Gagal memperbarui password di Supabase.', error: updateError.message });
+      return res.status(500).json({ success: false, message: 'Gagal memperbarui password di Supabase.', error: updateError.message });
     }
 
     // Optional: Re-authenticate to get a fresh session if needed, though update user usually refreshes it
@@ -505,7 +504,7 @@ const changePassword = async (req, res) => {
 
   } catch (error) {
     console.error("General error during password change:", error);
-    res.status(500).json({ success: false,  message: 'Terjadi kesalahan server.', error: error.message });
+    res.status(500).json({ success: false, message: 'Terjadi kesalahan server.', error: error.message });
   }
 };
 
@@ -553,19 +552,19 @@ const registerIbu = async (req, res) => {
       supabaseError = result.error;
     }
 
-    if (supabaseError) {
-      console.error("Supabase registration error:", supabaseError.message);
-      if (supabaseError.message.includes("User already registered")) {
-        return res.status(409).json({ message: 'Email sudah terdaftar.' }); // Pesan lebih umum
-      }
-      return res.status(500).json({ message: 'Gagal mendaftar user di Supabase Auth.', error: supabaseError.message });
-    }
+    if (supabaseError) {
+      console.error("Supabase registration error:", supabaseError.message);
+      if (supabaseError.message.includes("User already registered")) {
+        return res.status(409).json({ message: 'Email sudah terdaftar.' }); // Pesan lebih umum
+      }
+      return res.status(500).json({ message: 'Gagal mendaftar user di Supabase Auth.', error: supabaseError.message });
+    }
 
-    // Pastikan user Supabase berhasil dibuat dan memiliki ID
-    if (!supabaseUser || !supabaseUser.user || !supabaseUser.user.id) {
-        // Ini seharusnya tidak terjadi jika tidak ada supabaseError, tapi sebagai fallback
-        return res.status(500).json({ message: 'Gagal mendapatkan ID user dari Supabase Auth.' });
-    }
+    // Pastikan user Supabase berhasil dibuat dan memiliki ID
+    if (!supabaseUser || !supabaseUser.user || !supabaseUser.user.id) {
+      // Ini seharusnya tidak terjadi jika tidak ada supabaseError, tapi sebagai fallback
+      return res.status(500).json({ message: 'Gagal mendapatkan ID user dari Supabase Auth.' });
+    }
 
     // 2. Membuat data User baru ke database Prisma
     const fallbackEmail = email || `phone_${noTelp}@balansing.local`;
@@ -593,7 +592,7 @@ const registerIbu = async (req, res) => {
           id: generateRandomId(),
           email: fallbackEmail,
           authId: supabaseUser.user.id, // DUAL WRITE FASE 2
-          nama: namaIbu, 
+          nama: namaIbu,
           provinsi: provinsi,
           kota: kota,
           kecamatan: kecamatan,
@@ -604,38 +603,33 @@ const registerIbu = async (req, res) => {
           usia: usia,
           noTelp: noTelp,
           alamat: alamat,
-          user: {
-            connect: {
-                email: fallbackEmail,
-            }
-          }
         },
       });
     } catch (prismaKaderError) {
-      console.error("Prisma Kader creation error:", prismaKaderError);
-      // Jika pembuatan Kader di Prisma gagal, hapus user dari Supabase Auth dan Prisma User
-      if (supabaseUser && supabaseUser.user && supabaseUser.user.id) {
-        await supabaseAdmin.auth.admin.deleteUser(supabaseUser.user.id);
-      }
-      // PERBAIKAN: Gunakan email untuk menghapus user dari tabel Prisma
+      console.error("Prisma Kader creation error:", prismaKaderError);
+      // Jika pembuatan Kader di Prisma gagal, hapus user dari Supabase Auth dan Prisma User
+      if (supabaseUser && supabaseUser.user && supabaseUser.user.id) {
+        await supabaseAdmin.auth.admin.deleteUser(supabaseUser.user.id);
+      }
+      // PERBAIKAN: Gunakan email untuk menghapus user dari tabel Prisma
       await prisma.user.delete({ where: { email: fallbackEmail } });
-      return res.status(500).json({ message: 'Gagal membuat data kader di database.', error: prismaKaderError.message });
-    }
+      return res.status(500).json({ message: 'Gagal membuat data kader di database.', error: prismaKaderError.message });
+    }
 
-    res.status(201).json({
-      message: 'Registrasi kader berhasil! Silakan cek email Anda untuk verifikasi (jika diaktifkan).',
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        jenis: newUser.jenis,
-      },
-      ibu: newIbu,
-    });
+    res.status(201).json({
+      message: 'Registrasi berhasil! Silakan cek email Anda untuk verifikasi.',
+      user: {
+        id: newUser.id,
+        email: newUser.email,
+        jenis: newUser.jenis,
+      },
+      ibu: newIbu,
+    });
 
-  } catch (error) {
-    console.error("General registration error:", error);
-    res.status(500).json({ message: 'Terjadi kesalahan server.', error: error.message });
-  }
+  } catch (error) {
+    console.error("General registration error:", error);
+    res.status(500).json({ message: 'Terjadi kesalahan server.', error: error.message });
+  }
 };
 
 const cleanupUnconfirmedUsers = async () => {
@@ -649,9 +643,9 @@ const cleanupUnconfirmedUsers = async () => {
 
     const now = new Date();
     const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
-    
+
     // Filter users: belum konfirmasi email & dibuat lebih dari 7 hari yang lalu
-    const unconfirmedOldUsers = users.filter(user => 
+    const unconfirmedOldUsers = users.filter(user =>
       !user.email_confirmed_at && new Date(user.created_at) < sevenDaysAgo
     );
 
@@ -663,11 +657,11 @@ const cleanupUnconfirmedUsers = async () => {
     let deletedCount = 0;
     for (const user of unconfirmedOldUsers) {
       const email = user.email;
-      
+
       try {
         // Cari di tabel User Prisma
         const prismaUser = await prisma.user.findUnique({ where: { email } });
-        
+
         if (prismaUser) {
           // Hapus child data terlebih dahulu berdasarkan jenis
           if (prismaUser.jenis === 'KADER') {
@@ -675,7 +669,7 @@ const cleanupUnconfirmedUsers = async () => {
           } else if (prismaUser.jenis === 'IBU') {
             await prisma.ibuRumah.deleteMany({ where: { email } });
           }
-          
+
           // Hapus user di Prisma
           await prisma.user.delete({ where: { email } });
         }
@@ -688,7 +682,7 @@ const cleanupUnconfirmedUsers = async () => {
         console.error(`[CLEANUP] Gagal menghapus akun ${email}:`, err);
       }
     }
-    
+
     console.log(`[CLEANUP] Selesai. Total ${deletedCount} akun sampah dihapus.`);
   } catch (error) {
     console.error('[CLEANUP] Fatal error during cleanup:', error);

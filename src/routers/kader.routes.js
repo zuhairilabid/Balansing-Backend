@@ -11,9 +11,7 @@ const {
   getRecapById, 
   editAnak, 
   deleteAnak, 
-  getAnakKaderByMonth, 
-  getAnalisisKader, 
-  runBatchAnalisisKader  
+  getAnakKaderByMonth
 } = require("../controllers");
 
 const router = express.Router();
@@ -31,8 +29,6 @@ router.put("/anak", authenticateJWT, editAnak);
 router.post("/anak", authenticateJWT, unggahAnak);
 router.delete("/anak/:id", authenticateJWT, deleteAnak);
 
-router.get("/analisis/:idKader", authenticateJWT, getAnalisisKader);
-router.post("/analisis/batch/run", authenticateJWT, runBatchAnalisisKader);
 
 router.get("/test1", (req, res) => {
   res.send("Test");
