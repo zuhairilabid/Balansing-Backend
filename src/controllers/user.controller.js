@@ -91,8 +91,8 @@ const registerKader = async (req, res) => {
     } else if (noTelp) {
       // Jika mendaftar pakai nomor telepon murni
       const result = await supabaseAdmin.auth.admin.createUser({
-        phone: noTelp,
-        phone_confirm: true,
+        email_confirm: true,
+        email: `phone_${noTelp}@balansing.local`,
         password: password,
       });
       supabaseUser = result.data;
@@ -195,7 +195,7 @@ const login = async (req, res, next) => {
     if (email) {
       signInPayload.email = email;
     } else {
-      signInPayload.phone = noTelp;
+      signInPayload.email = `phone_${noTelp}@balansing.local`;
     }
 
     // Gunakan supabase.auth.signInWithPassword untuk login
@@ -544,8 +544,8 @@ const registerIbu = async (req, res) => {
       supabaseError = result.error;
     } else if (noTelp) {
       const result = await supabaseAdmin.auth.admin.createUser({
-        phone: noTelp,
-        phone_confirm: true,
+        email_confirm: true,
+        email: `phone_${noTelp}@balansing.local`,
         password: password,
       });
       supabaseUser = result.data;
