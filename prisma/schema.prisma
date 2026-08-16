@@ -49,18 +49,10 @@ model Posyandu {
   ibu       IbuRumah[]
 }
 
-model User {
-  email String @id
-  id    String
-  jenis String
-
-  kader    Kader?    @relation("KaderUser")
-  ibuRumah IbuRumah? @relation("IbuUser")
-}
 
 model Kader {
   id         String  @id @default(cuid())
-  email      String  @unique
+  email      String? @unique
   authId     String? @unique
   noTelp     String? @unique
   posyanduId String?
@@ -76,13 +68,12 @@ model Kader {
   kodePos       String?
 
   posyandu  Posyandu?   @relation(fields: [posyanduId], references: [id])
-  user      User        @relation("KaderUser", fields: [email], references: [email])
   anakKader AnakKader[]
 }
 
 model IbuRumah {
   id         String  @id @default(cuid())
-  email      String  @unique
+  email      String? @unique
   authId     String? @unique
   posyanduId String?
 
@@ -101,14 +92,12 @@ model IbuRumah {
   sanitasi  Boolean?
 
   posyandu    Posyandu? @relation(fields: [posyanduId], references: [id])
-  user        User      @relation("IbuUser", fields: [email], references: [email])
-  anakAnak    AnakIbu[] @relation("OldAnakIbu")
   anakAnakNew AnakIbu[] @relation("NewAnakIbu")
 }
 
 model AnakIbu {
   id           String       @id @default(cuid())
-  emailIbu     String
+  emailIbu     String?
   ibuId        String?
   nama         String
   usia         DateTime
@@ -122,7 +111,6 @@ model AnakIbu {
   cekMingguan  Boolean      @default(false)
   zscore       Float?
 
-  ibu    IbuRumah  @relation("OldAnakIbu", fields: [emailIbu], references: [email])
   ibuNew IbuRumah? @relation("NewAnakIbu", fields: [ibuId], references: [id])
 
   recapAnak RecapAnak[]
@@ -145,8 +133,9 @@ model AnakKader {
   tampakPucat         Boolean?
   riwayatAnemia       Boolean?
 
-  kaderEmail String
-  kader      Kader  @relation(fields: [kaderEmail], references: [email])
+  kaderEmail String?
+  kaderId    String?
+  kader      Kader?  @relation(fields: [kaderId], references: [id])
 }
 
 model RecapAnak {
