@@ -357,13 +357,14 @@ const generateAnalisisForPosyandu = async (idPosyandu, namaPosyandu) => {
     // 2. Ambil data AnakKader yang terkait dengan Posyandu ini
     const kadersInPosyandu = await prisma.kader.findMany({
       where: { posyanduId: idPosyandu },
-      select: { email: true }
+      select: { id: true }
     });
-    const kaderEmails = kadersInPosyandu.map(k => k.email);
+    const kaderIds = kadersInPosyandu.map(k => k.id);
 
     const anakKaderRecaps = await prisma.anakKader.findMany({
       where: {
-        kaderEmail: { in: kaderEmails },
+        // Fallback untuk kompabilitas: gunakan id jika ada, atau biarkan kosong jika masih perlu email (tapi sebaiknya id)
+        kaderId: { in: kaderIds },
         tanggal: { gte: start, lte: end },
       },
       select: { tanggal: true, stunting: true, anemia: true },
@@ -372,13 +373,13 @@ const generateAnalisisForPosyandu = async (idPosyandu, namaPosyandu) => {
     // 3. Ambil data RecapAnak dari IbuRumah di Posyandu ini
     const ibuInPosyandu = await prisma.ibuRumah.findMany({
       where: { posyanduId: idPosyandu },
-      select: { email: true }
+      select: { id: true }
     });
-    const ibuEmails = ibuInPosyandu.map(i => i.email);
+    const ibuIds = ibuInPosyandu.map(i => i.id);
 
     const recapAnakData = await prisma.recapAnak.findMany({
       where: {
-        anakIbu: { ibuEmail: { in: ibuEmails } },
+        anakIbu: { ibuId: { in: ibuIds } },
         tanggal: { gte: start, lte: end },
       },
       select: { tanggal: true, stunting: true, anemia: true },

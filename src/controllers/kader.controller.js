@@ -30,21 +30,30 @@ const prisma = require('../db');
 const getKader = async (req, res) => {
   try {
     const { email } = req.params;
+    const authId = req.dosen?.supabaseId;
 
     // Validate email if necessary (e.g., check for valid email format)
-    if (!email) {
-      return res.status(400).json({ error: "Email parameter is required." });
+    if (!email && !authId) {
+      return res.status(400).json({ error: "Email or Auth parameter is required." });
     }
 
-    const kader = await prisma.kader.findUnique({
-      where: { email },
-      include: {
-        posyandu: true,
-      }
-    });
+    let kader = null;
+    if (authId) {
+        kader = await prisma.kader.findUnique({
+          where: { authId: authId },
+          include: { posyandu: true }
+        });
+    }
+    
+    if (!kader && email && email !== 'null') {
+        kader = await prisma.kader.findFirst({
+          where: { email: email },
+          include: { posyandu: true }
+        });
+    }
 
     if (!kader) {
-      // If no kader is found with the given email
+      // If no kader is found
       return res.status(404).json({ error: "Kader not found." });
     }
 
@@ -80,6 +89,8 @@ const editKader = async (req, res) => {
       email, // Pastikan email ini datang dari body untuk identifikasi user yang akan diupdate
       posyanduId,
     } = req.body;
+    
+    const authId = req.dosen?.supabaseId;
 
     // Pastikan semua field yang ingin diupdate ada di req.body
     // Jika ada field lain seperti 'name', 'phone', 'address' yang juga ingin diupdate,
@@ -102,10 +113,28 @@ const editKader = async (req, res) => {
     } catch (err) {
       console.error("Error fetching posyandu:", err);
     }
+    
+    let updateWhere = { authId: authId };
+    if (!authId && email) {
+        updateWhere = { email: email };
+    }
+
+    // Jika ada email baru, sinkronisasikan dengan Supabase Auth
+    if (authId && email !== undefined) {
+      const { error: supabaseUpdateError } = await supabaseAdmin.auth.admin.updateUserById(
+        authId,
+        { email: email || null, email_confirm: !!email }
+      );
+      if (supabaseUpdateError) {
+        console.error("Error updating email in Supabase:", supabaseUpdateError);
+        return res.status(500).json({ error: "Gagal memperbarui email di sistem autentikasi." });
+      }
+    }
 
     const updatedKader = await prisma.kader.update({
-      where: { email: email }, // Menggunakan email dari req.body sebagai kriteria WHERE
+      where: updateWhere, // Menggunakan authId jika ada
       data: {
+        email: email || undefined, // Update email di Prisma
         posyanduId: posyanduId || undefined,
         namaPuskesmas: finalNamaPuskesmas,
         namaPosyandu: finalNamaPosyandu,
@@ -128,16 +157,31 @@ const editKader = async (req, res) => {
 const getRecap = async (req, res) => {
   try {
     const { email } = req.params; // Assuming email is available in req.user from JWT authentication
-    if (!email) {
-      return res.status(400).json({ error: "Email is required." });
+    const authId = req.dosen?.supabaseId;
+    if (!email && !authId) {
+      return res.status(400).json({ error: "Email or Auth parameter is required." });
     }
 
-    const kader = await prisma.kader.findUnique({
-      where: { email },
-    });
+    let kader = null;
+    if (authId) {
+        kader = await prisma.kader.findUnique({ where: { authId: authId } });
+    }
+    if (!kader && email && email !== 'null') {
+        kader = await prisma.kader.findFirst({ where: { email: email } });
+    }
+
+    let kaderIdQuery = {};
+    if (kader) {
+        kaderIdQuery = { kaderId: kader.id };
+    }
 
     const recap = await prisma.anakKader.findMany({
-      where: { kaderEmail: email },
+      where: { 
+         OR: [
+           { kaderEmail: email },
+           kaderIdQuery
+         ].filter(q => Object.keys(q).length > 0)
+      },
     });
 
     let allAnakIbuRecaps = [];
@@ -351,6 +395,7 @@ const unggahAnak = async (req, res) => {
       stunting: stuntingStatus, // Sekarang adalah String
       tanggal: new Date(tanggalPemeriksaan),
       kaderEmail: email,
+      kaderId: req.dosen?.supabaseId ? (await prisma.kader.findUnique({where: {authId: req.dosen.supabaseId}}))?.id : undefined,
       konjungtivitaNormal: konjungtivitaNormal,
       kukuBersih: kukuBersih,
       tampakLemas: tampakLemas,
@@ -557,14 +602,24 @@ const deleteAnak = async (req, res) => {
 const getAnakKaderByMonth = async (req, res) => {
   try {
     const { email, month, count, year } = req.body;
+    const authId = req.dosen?.supabaseId;
 
-    if (!email || !month || !count || !year) {
-      return res.status(400).json({ error: "Email, month, count, and year are required." });
+    if ((!email && !authId) || !month || !count || !year) {
+      return res.status(400).json({ error: "Email/Auth, month, count, and year are required." });
     }
 
-    const kader = await prisma.kader.findUnique({
-      where: { email },
-    });
+    let kader = null;
+    if (authId) {
+        kader = await prisma.kader.findUnique({ where: { authId: authId } });
+    }
+    if (!kader && email && email !== 'null') {
+        kader = await prisma.kader.findFirst({ where: { email: email } });
+    }
+
+    let kaderIdQuery = {};
+    if (kader) {
+        kaderIdQuery = { kaderId: kader.id };
+    }
 
     // Mengubah filter agar melihat ke belakang (backward) bukan ke depan (forward)
     const startDate = new Date(year, month - count, 1);
@@ -572,7 +627,10 @@ const getAnakKaderByMonth = async (req, res) => {
 
     const anakKader = await prisma.anakKader.findMany({
       where: {
-        kaderEmail: email,
+        OR: [
+          { kaderEmail: email },
+          kaderIdQuery
+        ].filter(q => Object.keys(q).length > 0),
         tanggal: {
           gte: startDate,
           lte: endDate,

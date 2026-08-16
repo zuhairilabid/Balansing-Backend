@@ -87,12 +87,12 @@ model IbuRumah {
   kodePos   String?
   alamat    String
   usia      Int
-  noTelp    String
+  noTelp    String  @unique
   cekAnak   Boolean?
   sanitasi  Boolean?
 
   posyandu    Posyandu? @relation(fields: [posyanduId], references: [id])
-  anakAnakNew AnakIbu[] @relation("NewAnakIbu")
+  anakAnak AnakIbu[] @relation("NewAnakIbu")
 }
 
 model AnakIbu {
@@ -111,7 +111,7 @@ model AnakIbu {
   cekMingguan  Boolean      @default(false)
   zscore       Float?
 
-  ibuNew IbuRumah? @relation("NewAnakIbu", fields: [ibuId], references: [id])
+  ibu IbuRumah? @relation("NewAnakIbu", fields: [ibuId], references: [id])
 
   recapAnak RecapAnak[]
 }

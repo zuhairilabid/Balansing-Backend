@@ -80,24 +80,17 @@ const registerKader = async (req, res) => {
     let supabaseUser, supabaseError;
 
     // 1. Membuat user di autentikasi Supabase
-    if (email) {
-      const result = await supabaseAdmin.auth.admin.createUser({
-        email_confirm: true,
-        email: email,
-        password: password,
-      });
-      supabaseUser = result.data;
-      supabaseError = result.error;
-    } else if (noTelp) {
-      // Jika mendaftar pakai nomor telepon murni
-      const result = await supabaseAdmin.auth.admin.createUser({
-        email_confirm: true,
-        email: `phone_${noTelp}@balansing.local`,
-        password: password,
-      });
-      supabaseUser = result.data;
-      supabaseError = result.error;
-    }
+    const supabasePayload = {
+      password: password,
+      email_confirm: true,
+      phone_confirm: true,
+    };
+    if (email) supabasePayload.email = email;
+    if (noTelp) supabasePayload.phone = noTelp;
+
+    const result = await supabaseAdmin.auth.admin.createUser(supabasePayload);
+    supabaseUser = result.data;
+    supabaseError = result.error;
 
     if (supabaseError) {
       console.error("Supabase registration error:", supabaseError.message);
@@ -176,8 +169,8 @@ const login = async (req, res, next) => {
     let signInPayload = { password };
     if (email) {
       signInPayload.email = email;
-    } else {
-      signInPayload.email = `phone_${noTelp}@balansing.local`;
+    } else if (noTelp) {
+      signInPayload.phone = noTelp;
     }
 
     // Gunakan supabase.auth.signInWithPassword untuk login
@@ -265,8 +258,9 @@ const requestPasswordReset = async (req, res) => {
   }
 
   try {
-    // PERUBAHAN DI SINI: Sesuaikan dengan URL backend Anda
-    const redirectToUrl = 'http://165.22.102.172:6500/api/user/handleresetpassword'; // <--- Ubah ini
+    // Menggunakan variabel environment atau fallback ke localhost untuk testing lokal
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:6500';
+    const redirectToUrl = `${backendUrl}/api/user/handleresetpassword`;
 
     // Gunakan supabaseAdmin untuk mengirim email reset password
     const { error } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
@@ -513,6 +507,7 @@ const registerIbu = async (req, res) => {
     noTelp,
     kodePos,
     alamat,
+    posyanduId,
   } = req.body;
 
   // Validasi input dasar
@@ -524,23 +519,17 @@ const registerIbu = async (req, res) => {
     let supabaseUser, supabaseError;
 
     // 1. Membuat user di autentikasi Supabase
-    if (email) {
-      const result = await supabaseAdmin.auth.admin.createUser({
-        email_confirm: true,
-        email: email,
-        password: password,
-      });
-      supabaseUser = result.data;
-      supabaseError = result.error;
-    } else if (noTelp) {
-      const result = await supabaseAdmin.auth.admin.createUser({
-        email_confirm: true,
-        email: `phone_${noTelp}@balansing.local`,
-        password: password,
-      });
-      supabaseUser = result.data;
-      supabaseError = result.error;
-    }
+    const supabasePayload = {
+      password: password,
+      email_confirm: true,
+      phone_confirm: true,
+    };
+    if (email) supabasePayload.email = email;
+    if (noTelp) supabasePayload.phone = noTelp;
+
+    const result = await supabaseAdmin.auth.admin.createUser(supabasePayload);
+    supabaseUser = result.data;
+    supabaseError = result.error;
 
     if (supabaseError) {
       console.error("Supabase registration error:", supabaseError.message);
@@ -578,6 +567,7 @@ const registerIbu = async (req, res) => {
           usia: usia,
           noTelp: noTelp,
           alamat: alamat,
+          posyanduId: posyanduId || null,
         },
       });
     } catch (prismaKaderError) {
