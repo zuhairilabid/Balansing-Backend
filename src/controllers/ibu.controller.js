@@ -42,22 +42,39 @@ const toWIB = (date) => {
 };
 
 const getIbu = async (req, res) => {
-  const { email } = req.params;
+  const { email } = req.params; // Masih diterima dari URL tapi kita akan memprioritaskan authId
+  const authId = req.dosen?.supabaseId;
+
   try {
     // 0. Pengecekan Lazy Evaluation Callback
     // Memastikan reset dijalankan jika cron job di background gagal/terlewat
     await resetIbuRumahChecks();
 
     // --- QUERY 1: Ambil data IbuRumah ---
-    // Query ini akan dijalankan dan ditunggu hasilnya
-    const ibu = await prisma.ibuRumah.findUnique({
-      where: { email },
-      include: {
-        _count: {
-          select: { anakAnak: true }
-        },
-      },
-    });
+    // Cari berdasarkan authId (lebih akurat karena email bisa null)
+    let ibu = null;
+    if (authId) {
+        ibu = await prisma.ibuRumah.findUnique({
+          where: { authId: authId },
+          include: {
+            _count: {
+              select: { anakAnak: true }
+            },
+          },
+        });
+    }
+
+    // Fallback jika tidak ketemu pakai authId (untuk kompabilitas lama)
+    if (!ibu && email && email !== 'null') {
+         ibu = await prisma.ibuRumah.findFirst({
+          where: { email: email },
+          include: {
+            _count: {
+              select: { anakAnak: true }
+            },
+          },
+        });
+    }
 
     // 2. Error Handling (IbuRumah)
     if (!ibu) {
@@ -82,7 +99,7 @@ const getIbu = async (req, res) => {
 
     // 4. Ambil Tanggal Pengecekan Terakhir Sebenarnya dari RecapAnak
     const latestRecap = await prisma.recapAnak.findFirst({
-      where: { anakIbu: { emailIbu: email } },
+      where: { anakIbu: { ibuId: ibu.id } },
       orderBy: { tanggal: 'desc' },
       select: { tanggal: true }
     });
@@ -238,7 +255,7 @@ const getDashboardAnak = async (req, res) => {
       statusAnemia: dataTerbaru.anemia,
       zScore: anakIbu.zscore,
       // Jika dataSebelumnya null (belum ada history pemeriksaan), fallback ke beratBadanL dan tinggiBadanL dari AnakIbu
-      bbSebelumnya: dataSebelumnya ? dataSebelumnya.beratBadan : anakIbu.beratBadanL,
+      bbSebelumnya: dataSebelumnya ? dataSebelumnya.beratBadan : anakIbu.beratBadanL / 1000,
       tbSebelumnya: dataSebelumnya ? dataSebelumnya.tinggiBadan : anakIbu.tinggiBadanL,
       rataRataBB12Bulan: averageBB.toFixed(2),
       rataRataTB12Bulan: averageTB.toFixed(2),
@@ -323,11 +340,25 @@ const deleteAnakbyId = async (req, res) => {
 const addAnak = async (req, res) => {
   try {
     const { email, nama, beratBadan, tinggiBadan, jenisKelamin, usia, bbLahir, tbLahir } = req.body;
+    const authId = req.dosen?.supabaseId;
 
     const today = dayjs();
     // Diasumsikan 'usia' adalah tanggal lahir (birthDate) dalam format yang dapat diparsing oleh dayjs
     const birthDate = dayjs(usia);
     const usiaInMonths = today.diff(birthDate, 'month');
+
+    // Temukan ibu terkait
+    let ibu;
+    if (authId) {
+      ibu = await prisma.ibuRumah.findUnique({ where: { authId } });
+    }
+    if (!ibu && email && email !== 'null') {
+      ibu = await prisma.ibuRumah.findUnique({ where: { email } });
+    }
+
+    if (!ibu) {
+      return res.status(404).json({ error: "Ibu tidak ditemukan." });
+    }
 
     // --- 1. Panggil API untuk memeriksa stunting ---
     let stuntingStatus;
@@ -422,7 +453,8 @@ const addAnak = async (req, res) => {
     const anakIbuData = {
       nama: nama,
       jenisKelamin: jenisKelamin,
-      emailIbu: email,
+      emailIbu: email !== 'null' ? email : null,
+      ibuId: ibu.id, // Gunakan id ibu yang baru kita cari
       usia: usia, // Tetap gunakan tanggal lahir (string ISO)
       beratBadanL: parseFloat(bbLahir),
       tinggiBadanL: parseFloat(tbLahir),
@@ -460,7 +492,7 @@ const addAnak = async (req, res) => {
 
     // Update IbuRumah agar bisa langsung melakukan cek
     await prisma.ibuRumah.update({
-      where: { email: email },
+      where: { id: ibu.id },
       data: { cekAnak: true }
     });
 
@@ -583,13 +615,28 @@ const editAnakIbu = async (req, res) => {
 const getAllAnak = async (req, res) => {
   try {
     const { email } = req.params;
+    const authId = req.dosen?.supabaseId;
 
-    if (!email) {
-      return res.status(400).json({ error: "Email is required." });
+    let whereClause = {};
+
+    if (authId) {
+       const ibu = await prisma.ibuRumah.findUnique({ where: { authId } });
+       if (ibu) {
+           whereClause = { ibuId: ibu.id };
+       } else if (email && email !== 'null') {
+           whereClause = { emailIbu: email };
+       } else {
+           return res.status(200).json([]);
+       }
+    } else {
+       if (!email || email === 'null') {
+         return res.status(400).json({ error: "Email or Auth is required." });
+       }
+       whereClause = { emailIbu: email };
     }
 
     const recap = await prisma.anakIbu.findMany({
-      where: { emailIbu: email },
+      where: whereClause,
     });
 
     res.status(200).json(recap || { message: "No recap found for this Ibu." });
@@ -604,6 +651,7 @@ const getAllAnak = async (req, res) => {
 const editIbu = async (req, res) => {
   try {
     const {
+      email, // Menerima email dari frontend
       nama,
       usia,
       noTelp,
@@ -615,15 +663,35 @@ const editIbu = async (req, res) => {
       rt,
       rw,
       alamat,
-      email, // Pastikan email ini datang dari body untuk identifikasi user yang akan diupdate
     } = req.body;
+    
+    const authId = req.dosen?.supabaseId;
+
+    let updateWhere = { authId: authId };
+    // Jika tidak ada authId dari JWT (seharusnya selalu ada), fallback ke email lama jika disediakan
+    if (!authId && email) {
+        updateWhere = { email: email };
+    }
+
+    // Jika ada email baru, sinkronisasikan dengan Supabase Auth
+    if (authId && email !== undefined) {
+      const { error: supabaseUpdateError } = await supabaseAdmin.auth.admin.updateUserById(
+        authId,
+        { email: email || null, email_confirm: !!email } // update atau hapus email
+      );
+      if (supabaseUpdateError) {
+        console.error("Error updating email in Supabase:", supabaseUpdateError);
+        return res.status(500).json({ error: "Gagal memperbarui email di sistem autentikasi." });
+      }
+    }
 
     // Pastikan semua field yang ingin diupdate ada di req.body
     // Jika ada field lain seperti 'name', 'phone', 'address' yang juga ingin diupdate,
     // pastikan itu juga disertakan di req.body dan skema Prisma Anda.
     const updatedKader = await prisma.ibuRumah.update({
-      where: { email: email }, // Menggunakan email dari req.body sebagai kriteria WHERE
+      where: updateWhere, // Menggunakan authId jika ada
       data: {
+        email: email || undefined, // Update email di Prisma
         nama: nama,
         usia: usia,
         noTelp: noTelp,
@@ -648,20 +716,33 @@ const editIbu = async (req, res) => {
 const getRecapAnakMonthly = async (req, res) => {
   try {
     const { ibuId, month, year } = req.body;
+    const authId = req.dosen?.supabaseId;
     const parsedMonth = parseInt(month);
     const parsedYear = parseInt(year);
 
-    if (!ibuId || isNaN(parsedMonth) || isNaN(parsedYear)) {
-      return res.status(400).json({ error: "ibuId, month, and year are required and must be valid numbers." });
+    if ((!ibuId && !authId) || isNaN(parsedMonth) || isNaN(parsedYear)) {
+      return res.status(400).json({ error: "ibuId/authId, month, and year are required and must be valid numbers." });
+    }
+
+    let ibu;
+    if (authId) {
+      ibu = await prisma.ibuRumah.findUnique({ where: { authId } });
+    }
+    if (!ibu && ibuId && ibuId !== 'null' && ibuId !== '') {
+      ibu = await prisma.ibuRumah.findUnique({ where: { email: ibuId } });
+    }
+
+    if (!ibu) {
+      return res.status(404).json({ error: "Ibu tidak ditemukan." });
     }
 
     const RecapMonth = await prisma.recapAnak.findMany({
       where: {
         anakIbu: {
-          emailIbu: ibuId,
+          ibuId: ibu.id,
         },
         tanggal: {
-          gte: new Date(month, parsedMonth - 1, 1),
+          gte: new Date(parsedYear, parsedMonth - 1, 1),
           lt: new Date(parsedYear, parsedMonth, 1),
         },
       },
@@ -808,7 +889,7 @@ const getRecapAnakbyId = async (req, res) => {
       // Fallback: Jika ini adalah cek kesehatan pertama dan belum ada recap pendaftaran (untuk user lama)
       // Gunakan data lahir (L) sebagai data sebelumnya agar UI tidak menampilkan angka 0
       previousRecap = {
-        beratBadan: currentRecap.anakIbu.beratBadanL,
+        beratBadan: currentRecap.anakIbu.beratBadanL / 1000, // Konversi dari gram ke kg
         tinggiBadan: currentRecap.anakIbu.tinggiBadanL,
       };
     }
@@ -914,8 +995,15 @@ const addRecapAnak = async (req, res) => {
       });
 
       if (existingRecap) {
-        console.log(`[Idempotency] Anak ${anakId} sudah dicek hari ini (${startOfDay.toLocaleDateString()}). Mengabaikan duplikat.`);
-        return res.status(200).json({ message: "Data kesehatan untuk hari ini sudah berhasil disimpan sebelumnya. Gunakan Edit jika ada kesalahan." });
+        if (existingRecap.rekomendasi === "Data pendaftaran awal. Belum ada rekomendasi dari asisten AI.") {
+          await prisma.recapAnak.delete({
+            where: { kodeRecap: existingRecap.kodeRecap }
+          });
+          console.log(`[Idempotency Bypass] Menghapus data pendaftaran awal anak ${anakId} untuk digantikan dengan cek kesehatan perdana.`);
+        } else {
+          console.log(`[Idempotency] Anak ${anakId} sudah dicek hari ini (${startOfDay.toLocaleDateString()}). Mengabaikan duplikat.`);
+          return res.status(200).json({ message: "Data kesehatan untuk hari ini sudah berhasil disimpan sebelumnya. Gunakan Edit jika ada kesalahan." });
+        }
       }
     }
 
@@ -1043,12 +1131,14 @@ const addRecapAnak = async (req, res) => {
 
     let namaAnak = "Anak";
     let namaIbu = "Ibu";
+    let ibuId = null;
     try {
       const anakRecord = await prisma.anakIbu.findUnique({
         where: { id: anakId },
       });
       if (anakRecord) {
         namaAnak = anakRecord.nama;
+        ibuId = anakRecord.ibuId;
       }
       if (req.user && req.user.nama) {
         namaIbu = req.user.nama;
@@ -1118,19 +1208,25 @@ Berdasarkan data yang diberikan, anak berusia ${usia} bulan dengan berat badan $
     });
 
     const checkmingguan = await prisma.anakIbu.findMany({
-      where: {
-        emailIbu: email,
-        cekMingguan: true,
-      },
+      where: ibuId ? { ibuId: ibuId, cekMingguan: true } : { emailIbu: email, cekMingguan: true },
     });
 
     if (checkmingguan.length === 0) {
-      const updateIbu = await prisma.ibuRumah.update({
-        where: { email: email },
-        data: {
-          cekAnak: false,
-        },
-      });
+      if (ibuId) {
+        const updateIbu = await prisma.ibuRumah.update({
+          where: { id: ibuId },
+          data: {
+            cekAnak: false,
+          },
+        });
+      } else if (email && email !== 'null') {
+        const updateIbu = await prisma.ibuRumah.update({
+          where: { email: email },
+          data: {
+            cekAnak: false,
+          },
+        });
+      }
     }
 
     res.status(201).json({
