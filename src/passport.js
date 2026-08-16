@@ -14,7 +14,7 @@ passport.use(
     async (email, password, done) => {
       try {
         // Cari user di database berdasarkan email
-        const user = await prisma.user.findUnique({
+        const user = await prisma.kader.findFirst({
           where: { email: email },
         });
 
@@ -66,7 +66,7 @@ function authenticateJWT(req, res, next) {
 
 // passport.deserializeUser(async (email, done) => {
 //   try {
-//     const user = await prisma.user.findUnique({
+//     const user = await prisma.kader.findFirst({
 //       where: { email: email },
 //     });
 //     done(null, user);

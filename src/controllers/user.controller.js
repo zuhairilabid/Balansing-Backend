@@ -113,24 +113,8 @@ const registerKader = async (req, res) => {
       return res.status(500).json({ message: 'Gagal mendapatkan ID user dari Supabase Auth.' });
     }
 
-    // 2. Membuat data User baru ke database Prisma
-    // PENTING: Karena Prisma schema lama mewajibkan email, kita buat dummy HANYA untuk database jika tidak ada email
-    const fallbackEmail = email || `phone_${noTelp}@balansing.local`;
-
-    let newUser;
-    try {
-      newUser = await prisma.user.create({
-        data: {
-          id: supabaseUser.user.id,
-          email: fallbackEmail,
-          jenis: 'KADER',
-        },
-      });
-    } catch (prismaUserError) {
-      console.error("Prisma User creation error:", prismaUserError);
-      await supabaseAdmin.auth.admin.deleteUser(supabaseUser.user.id);
-      return res.status(500).json({ message: 'Gagal membuat data user di database (Prisma).', error: prismaUserError.message });
-    }
+    // 2. Data Prisma User lama Dihapus (Step 2 dihapus)
+    const fallbackEmail = email || null; // Sekarang kita bisa pakai null jika tidak ada email!
 
     // 3. Membuat data baru di Kader
     let newKader;
@@ -155,21 +139,19 @@ const registerKader = async (req, res) => {
       });
     } catch (prismaKaderError) {
       console.error("Prisma Kader creation error:", prismaKaderError);
-      // Jika pembuatan Kader di Prisma gagal, hapus user dari Supabase Auth dan Prisma User
+      // PERBAIKAN: Jika pembuatan kader gagal, hapus user dari Supabase
       if (supabaseUser && supabaseUser.user && supabaseUser.user.id) {
         await supabaseAdmin.auth.admin.deleteUser(supabaseUser.user.id);
       }
-      // PERBAIKAN: Gunakan email untuk menghapus user dari tabel Prisma
-      await prisma.user.delete({ where: { email: fallbackEmail } });
       return res.status(500).json({ message: 'Gagal membuat data kader di database.', error: prismaKaderError.message });
     }
 
     res.status(201).json({
       message: 'Registrasi berhasil! Silakan cek email Anda untuk verifikasi.',
       user: {
-        id: newUser.id,
-        email: newUser.email,
-        jenis: newUser.jenis,
+        id: newKader.authId,
+        email: newKader.email,
+        jenis: 'KADER',
       },
       kader: newKader,
     });
@@ -214,9 +196,17 @@ const login = async (req, res, next) => {
     }
 
     // Ambil data user dari tabel Prisma (Mencari berdasarkan ID dari Supabase)
-    const userProfile = await prisma.user.findFirst({
-      where: { id: supabaseUser.id },
+    let userProfile = await prisma.kader.findFirst({
+      where: { authId: supabaseUser.id },
     });
+    let jenisUser = 'KADER';
+
+    if (!userProfile) {
+      userProfile = await prisma.ibuRumah.findFirst({
+        where: { authId: supabaseUser.id },
+      });
+      jenisUser = 'IBU';
+    }
 
     if (!userProfile) {
       console.warn(`User with ID ${supabaseUser.id} found in Supabase Auth but not in Prisma User table.`);
@@ -228,8 +218,8 @@ const login = async (req, res, next) => {
     const token = jwt.sign(
       {
         supabaseId: supabaseUser.id,
-        email: userProfile.email, // bisa berupa fallback/dummy email
-        jenis: userProfile.jenis,
+        email: userProfile.email, // bisa null
+        jenis: jenisUser,
       },
       secretKey,
       { expiresIn: '1000h' }
@@ -241,7 +231,7 @@ const login = async (req, res, next) => {
       user: {
         id: userProfile.id,
         email: userProfile.email,
-        jenis: userProfile.jenis,
+        jenis: jenisUser,
       },
     });
 
@@ -566,23 +556,8 @@ const registerIbu = async (req, res) => {
       return res.status(500).json({ message: 'Gagal mendapatkan ID user dari Supabase Auth.' });
     }
 
-    // 2. Membuat data User baru ke database Prisma
-    const fallbackEmail = email || `phone_${noTelp}@balansing.local`;
-
-    let newUser;
-    try {
-      newUser = await prisma.user.create({
-        data: {
-          id: supabaseUser.user.id,
-          email: fallbackEmail,
-          jenis: 'IBU',
-        },
-      });
-    } catch (prismaUserError) {
-      console.error("Prisma User creation error:", prismaUserError);
-      await supabaseAdmin.auth.admin.deleteUser(supabaseUser.user.id);
-      return res.status(500).json({ message: 'Gagal membuat data user di database (Prisma).', error: prismaUserError.message });
-    }
+    // 2. Data Prisma User lama dihapus (Step 2)
+    const fallbackEmail = email || null;
 
     // 3. Membuat data baru di IbuRumah
     let newIbu;
@@ -607,21 +582,19 @@ const registerIbu = async (req, res) => {
       });
     } catch (prismaKaderError) {
       console.error("Prisma Kader creation error:", prismaKaderError);
-      // Jika pembuatan Kader di Prisma gagal, hapus user dari Supabase Auth dan Prisma User
+      // Jika pembuatan Ibu di Prisma gagal, hapus user dari Supabase
       if (supabaseUser && supabaseUser.user && supabaseUser.user.id) {
         await supabaseAdmin.auth.admin.deleteUser(supabaseUser.user.id);
       }
-      // PERBAIKAN: Gunakan email untuk menghapus user dari tabel Prisma
-      await prisma.user.delete({ where: { email: fallbackEmail } });
       return res.status(500).json({ message: 'Gagal membuat data kader di database.', error: prismaKaderError.message });
     }
 
     res.status(201).json({
       message: 'Registrasi berhasil! Silakan cek email Anda untuk verifikasi.',
       user: {
-        id: newUser.id,
-        email: newUser.email,
-        jenis: newUser.jenis,
+        id: newIbu.authId,
+        email: newIbu.email,
+        jenis: 'IBU',
       },
       ibu: newIbu,
     });
@@ -659,19 +632,16 @@ const cleanupUnconfirmedUsers = async () => {
       const email = user.email;
 
       try {
-        // Cari di tabel User Prisma
-        const prismaUser = await prisma.user.findUnique({ where: { email } });
-
-        if (prismaUser) {
-          // Hapus child data terlebih dahulu berdasarkan jenis
-          if (prismaUser.jenis === 'KADER') {
-            await prisma.kader.deleteMany({ where: { email } });
-          } else if (prismaUser.jenis === 'IBU') {
-            await prisma.ibuRumah.deleteMany({ where: { email } });
+        // Cek di Kader
+        const kaderProfile = await prisma.kader.findFirst({ where: { authId: user.id } });
+        if (kaderProfile) {
+          await prisma.kader.deleteMany({ where: { authId: user.id } });
+        } else {
+          // Cek di IbuRumah
+          const ibuProfile = await prisma.ibuRumah.findFirst({ where: { authId: user.id } });
+          if (ibuProfile) {
+            await prisma.ibuRumah.deleteMany({ where: { authId: user.id } });
           }
-
-          // Hapus user di Prisma
-          await prisma.user.delete({ where: { email } });
         }
 
         // Hapus dari Supabase Auth
