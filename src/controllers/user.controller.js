@@ -107,11 +107,11 @@ const registerKader = async (req, res) => {
 
     let supabaseUser, supabaseError;
 
-    // 1. Membuat user di autentikasi Supabase
+    // 1. Membuat user di autentikasi Supabase menggunakan Admin API (Mencegah token invalidation dan mempermudah bypass rate limit)
     const supabasePayload = {
       password: password,
-      email_confirm: true,
       phone_confirm: true,
+      email_confirm: false, // Set false agar mereka tetap harus verifikasi jika ada email
     };
     if (email) supabasePayload.email = email;
     if (noTelp) supabasePayload.phone = noTelp;
@@ -119,6 +119,42 @@ const registerKader = async (req, res) => {
     const result = await supabaseAdmin.auth.admin.createUser(supabasePayload);
     supabaseUser = result.data;
     supabaseError = result.error;
+
+    // Jika berhasil buat user dengan email, generate link manual untuk testing (Bypass Rate Limit)
+    if (!supabaseError && email && supabaseUser?.user) {
+      try {
+        const backendUrl = process.env.BACKEND_URL || 'http://localhost:6500';
+        const redirectToUrl = `${backendUrl}/api/user/verify-callback`;
+
+        const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
+          type: 'signup',
+          email: email,
+          password: password,
+          options: {
+            redirectTo: redirectToUrl,
+          }
+        });
+        
+        if (linkData?.properties?.action_link) {
+          console.log("\n=======================================================");
+          console.log("🛠️ BYPASS RATE LIMIT EMAIL VERIFICATION");
+          console.log("Klik link di bawah ini untuk memverifikasi email kader:");
+          console.log(linkData.properties.action_link);
+          console.log("=======================================================\n");
+        }
+
+        // Coba kirim email aslinya (jika tidak kena rate limit)
+        await supabase.auth.resend({ 
+          type: 'signup', 
+          email: email,
+          options: {
+            emailRedirectTo: redirectToUrl,
+          }
+        });
+      } catch (err) {
+        console.log("Pesan email tidak terkirim karena rate limit, tapi user bisa menggunakan link di atas.");
+      }
+    }
 
     if (supabaseError) {
       console.error("Supabase registration error:", supabaseError.message);
@@ -230,6 +266,11 @@ const login = async (req, res, next) => {
 
     if (error) {
       console.error("Supabase login error:", error.message);
+      
+      if (error.message.toLowerCase().includes('email not confirmed')) {
+        return res.status(403).json({ message: 'Email belum diverifikasi. Silakan periksa kotak masuk email Anda.' });
+      }
+
       // Karena kita sudah memfilter "Email tidak terdaftar" di atas, 
       // Jika sampai sini terjadi error "Invalid login credentials", maka dipastikan itu adalah salah password.
       return res.status(401).json({ message: 'Password salah. Silakan coba lagi.' });
@@ -601,11 +642,11 @@ const registerIbu = async (req, res) => {
 
     let supabaseUser, supabaseError;
 
-    // 1. Membuat user di autentikasi Supabase
+    // 1. Membuat user di autentikasi Supabase menggunakan Admin API (Mencegah token invalidation dan mempermudah bypass rate limit)
     const supabasePayload = {
       password: password,
-      email_confirm: true,
       phone_confirm: true,
+      email_confirm: false, // Set false agar mereka tetap harus verifikasi jika ada email
     };
     if (email) supabasePayload.email = email;
     if (noTelp) supabasePayload.phone = noTelp;
@@ -613,6 +654,42 @@ const registerIbu = async (req, res) => {
     const result = await supabaseAdmin.auth.admin.createUser(supabasePayload);
     supabaseUser = result.data;
     supabaseError = result.error;
+
+    // Jika berhasil buat user dengan email, generate link manual untuk testing (Bypass Rate Limit)
+    if (!supabaseError && email && supabaseUser?.user) {
+      try {
+        const backendUrl = process.env.BACKEND_URL || 'http://localhost:6500';
+        const redirectToUrl = `${backendUrl}/api/user/verify-callback`;
+
+        const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
+          type: 'signup',
+          email: email,
+          password: password,
+          options: {
+            redirectTo: redirectToUrl,
+          }
+        });
+        
+        if (linkData?.properties?.action_link) {
+          console.log("\n=======================================================");
+          console.log("🛠️ BYPASS RATE LIMIT EMAIL VERIFICATION");
+          console.log("Klik link di bawah ini untuk memverifikasi email ibu:");
+          console.log(linkData.properties.action_link);
+          console.log("=======================================================\n");
+        }
+
+        // Coba kirim email aslinya (jika tidak kena rate limit)
+        await supabase.auth.resend({ 
+          type: 'signup', 
+          email: email,
+          options: {
+            emailRedirectTo: redirectToUrl,
+          }
+        });
+      } catch (err) {
+        console.log("Pesan email tidak terkirim karena rate limit, tapi user bisa menggunakan link di atas.");
+      }
+    }
 
     if (supabaseError) {
       console.error("Supabase registration error:", supabaseError.message);
@@ -741,6 +818,54 @@ const cleanupUnconfirmedUsers = async () => {
   }
 };
 
+const verifyEmailCallback = async (req, res) => {
+  const { code } = req.query;
+
+  if (!code) {
+    return res.status(400).send(`
+      <html>
+        <body style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+          <h2>Link verifikasi tidak valid atau tidak lengkap.</h2>
+          <p>Parameter 'code' tidak ditemukan.</p>
+        </body>
+      </html>
+    `);
+  }
+
+  try {
+    // Tukar kode PKCE untuk session yang otomatis memverifikasi email
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    
+    if (error) {
+      console.error("Error exchanging code:", error.message);
+      return res.status(400).send(`
+        <html>
+          <body style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+            <h2 style="color: red;">Verifikasi Gagal</h2>
+            <p>${error.message}</p>
+          </body>
+        </html>
+      `);
+    }
+
+    // Jika berhasil, tampilkan halaman sukses
+    res.send(`
+      <html>
+        <body style="font-family: sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f4;">
+          <div style="background-color: white; padding: 40px; border-radius: 10px; max-width: 500px; margin: 0 auto; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h1 style="color: #4CAF50;">✅ Verifikasi Berhasil!</h1>
+            <p style="font-size: 16px; color: #333;">Email Anda telah sukses diverifikasi.</p>
+            <p style="font-size: 16px; color: #666;">Anda sekarang dapat kembali ke aplikasi Balansing dan melakukan login.</p>
+          </div>
+        </body>
+      </html>
+    `);
+  } catch (err) {
+    console.error("General error verify callback:", err);
+    res.status(500).send("Terjadi kesalahan internal server.");
+  }
+};
+
 module.exports = {
   changePassword,
   login,
@@ -751,4 +876,5 @@ module.exports = {
   updatePasswordFromForm,
   registerIbu,
   cleanupUnconfirmedUsers,
+  verifyEmailCallback,
 };
