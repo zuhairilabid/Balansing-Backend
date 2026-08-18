@@ -8,30 +8,21 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// Definisikan enum untuk tipe stunting
-enum StuntingType {
-  SangatPendek
-  Pendek
-  Normal
-  Tinggi
-}
-
 model GlobalSchedule {
-  key            String    @id // Kunci unik, misal: "CHECK_RESET_DATE"
-  value_date     DateTime // Tanggal target berikutnya untuk reset
-  last_execution DateTime? // Kapan terakhir kali fungsi reset dijalankan
+  key            String    @id
+  value_date     DateTime
+  last_execution DateTime?
 }
 
 model Puskesmas {
-  id            String  @id @default(cuid())
-  namaPuskesmas String  @unique
+  id            String     @id @default(cuid())
+  namaPuskesmas String     @unique
   alamatLengkap String?
-
-  posyandu Posyandu[]
+  posyandu      Posyandu[]
 }
 
 model Posyandu {
-  id            String  @id @default(cuid())
+  id            String     @id @default(cuid())
   namaPosyandu  String
   puskesmasId   String
   provinsi      String?
@@ -41,22 +32,16 @@ model Posyandu {
   rt            String?
   rw            String?
   alamatLengkap String?
-  rekomendasi   DateTime @default(now())
+  rekomendasi   DateTime   @default(now())
   tinjauan      String?
-
-  puskesmas Puskesmas  @relation(fields: [puskesmasId], references: [id])
-  kader     Kader[]
-  ibu       IbuRumah[]
+  ibu           IbuRumah[]
+  kader         Kader[]
+  puskesmas     Puskesmas  @relation(fields: [puskesmasId], references: [id])
 }
 
-
 model Kader {
-  id         String  @id @default(cuid())
-  email      String? @unique
-  authId     String? @unique
-  noTelp     String? @unique
-  posyanduId String?
-
+  id            String      @id @default(cuid())
+  email         String?     @unique
   namaPuskesmas String
   namaPosyandu  String
   provinsi      String
@@ -66,54 +51,52 @@ model Kader {
   rt            String
   rw            String
   kodePos       String?
-
-  posyandu  Posyandu?   @relation(fields: [posyanduId], references: [id])
-  anakKader AnakKader[]
+  authId        String?     @unique
+  noTelp        String?     @unique
+  posyanduId    String?
+  anakKader     AnakKader[]
+  posyandu      Posyandu?   @relation(fields: [posyanduId], references: [id])
 }
 
 model IbuRumah {
-  id         String  @id @default(cuid())
-  email      String? @unique
-  authId     String? @unique
+  id         String    @id @default(cuid())
+  email      String?   @unique
+  provinsi   String
+  nama       String
+  kota       String
+  kecamatan  String
+  kelurahan  String
+  rt         String
+  rw         String
+  kodePos    String?
+  alamat     String
+  usia       Int
+  noTelp     String    @unique
+  cekAnak    Boolean?
+  sanitasi   Boolean?
+  authId     String?   @unique
   posyanduId String?
-
-  provinsi  String
-  nama      String
-  kota      String
-  kecamatan String
-  kelurahan String
-  rt        String
-  rw        String
-  kodePos   String?
-  alamat    String
-  usia      Int
-  noTelp    String  @unique
-  cekAnak   Boolean?
-  sanitasi  Boolean?
-
-  posyandu    Posyandu? @relation(fields: [posyanduId], references: [id])
-  anakAnak AnakIbu[] @relation("NewAnakIbu")
+  anakAnak   AnakIbu[] @relation("NewAnakIbu")
+  posyandu   Posyandu? @relation(fields: [posyanduId], references: [id])
 }
 
 model AnakIbu {
   id           String       @id @default(cuid())
   emailIbu     String?
-  ibuId        String?
   nama         String
   usia         DateTime
   beratBadan   Float
   tinggiBadan  Float
   beratBadanL  Float?
   tinggiBadanL Float?
-  stunting     StuntingType // Ganti tipe data stunting menjadi enum
+  stunting     StuntingType
   anemia       Boolean
   jenisKelamin String
   cekMingguan  Boolean      @default(false)
   zscore       Float?
-
-  ibu IbuRumah? @relation("NewAnakIbu", fields: [ibuId], references: [id])
-
-  recapAnak RecapAnak[]
+  ibuId        String?
+  ibu          IbuRumah?    @relation("NewAnakIbu", fields: [ibuId], references: [id])
+  recapAnak    RecapAnak[]
 }
 
 model AnakKader {
@@ -124,7 +107,7 @@ model AnakKader {
   beratBadan          Float
   tinggiBadan         Float
   anemia              Boolean
-  stunting            StuntingType // Ganti tipe data stunting menjadi enum
+  stunting            StuntingType
   jenisKelamin        String
   tanggal             DateTime?
   konjungtivitaNormal Boolean?
@@ -132,10 +115,9 @@ model AnakKader {
   tampakLemas         Boolean?
   tampakPucat         Boolean?
   riwayatAnemia       Boolean?
-
-  kaderEmail String?
-  kaderId    String?
-  kader      Kader?  @relation(fields: [kaderId], references: [id])
+  kaderEmail          String?
+  kaderId             String?
+  kader               Kader?       @relation(fields: [kaderId], references: [id])
 }
 
 model RecapAnak {
@@ -153,8 +135,7 @@ model RecapAnak {
   tampakLemas          Boolean
   tampakPucat          Boolean
   rekomendasi          String
-
-  anakIbu AnakIbu @relation(fields: [anakIbuId], references: [id])
+  anakIbu              AnakIbu      @relation(fields: [anakIbuId], references: [id])
 }
 
 model Artikel {
@@ -163,11 +144,18 @@ model Artikel {
   tanggal DateTime
   konten  String
   gambar  String?
-  tags    Tag[]    @relation(name: "ArtikelTags")
+  tags    Tag[]    @relation("ArtikelTags")
 }
 
 model Tag {
   id      String    @id @default(cuid())
   nama    String    @unique
-  artikel Artikel[] @relation(name: "ArtikelTags")
+  artikel Artikel[] @relation("ArtikelTags")
+}
+
+enum StuntingType {
+  SangatPendek
+  Pendek
+  Normal
+  Tinggi
 }

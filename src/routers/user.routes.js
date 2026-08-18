@@ -1,7 +1,7 @@
 const express = require("express");
 const { passport } = require("../passport");
 
-const { login, registerKader, logout, requestPasswordReset, handleResetPasswordPage, updatePasswordFromForm, registerIbu, getAllPosyandu } = require("../controllers");
+const { login, registerKader, logout, requestPasswordReset, handleResetPasswordPage, updatePasswordFromForm, registerIbu, getAllPosyandu, verifyEmailCallback } = require("../controllers");
 
 const { loginRateLimiter } = require("../middlewares/RateLimit");
 
@@ -17,6 +17,8 @@ router.post("/logout", logout);
 router.post("/forgetPass", requestPasswordReset );
 router.get('/handleresetpassword', handleResetPasswordPage);
 router.post('/handleresetpassword', updatePasswordFromForm);
+
+router.get("/verify-callback", verifyEmailCallback);
 
 router.get("/test1", (req, res) => {
   res.send("Test");
