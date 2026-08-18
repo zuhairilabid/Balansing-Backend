@@ -7,6 +7,14 @@ const crypto = require('crypto');
 const passport = require('../passport'); // Jika Anda menggunakan passport
 const jwt = require('jsonwebtoken');
 
+// ============================================================================
+// KONFIGURASI GLOBAL
+// ============================================================================
+// Ubah ke 'true' jika Anda sudah menyiapkan Custom SMTP (misal: Gmail) dan 
+// ingin user wajib memverifikasi email mereka sebelum bisa menggunakan aplikasi.
+// Jika 'false', akun yang didaftarkan akan langsung aktif (email_confirm: true).
+const REQUIRE_EMAIL_VERIFICATION = false;
+// ============================================================================
 // Supabase Client untuk sisi client (jika Anda menggunakannya di backend untuk beberapa kasus)
 // Biasanya ini untuk operasi yang memerlukan kunci ANON_KEY
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY); // <--- PERBAIKAN: Gunakan ANON_KEY
@@ -111,7 +119,7 @@ const registerKader = async (req, res) => {
     const supabasePayload = {
       password: password,
       phone_confirm: true,
-      email_confirm: false, // Set false agar mereka tetap harus verifikasi jika ada email
+      email_confirm: !REQUIRE_EMAIL_VERIFICATION, // Dinamis: true jika tidak butuh verifikasi, false jika butuh
     };
     if (email) supabasePayload.email = email;
     if (noTelp) supabasePayload.phone = noTelp;
@@ -120,8 +128,8 @@ const registerKader = async (req, res) => {
     supabaseUser = result.data;
     supabaseError = result.error;
 
-    // Jika berhasil buat user dengan email, generate link manual untuk testing (Bypass Rate Limit)
-    if (!supabaseError && email && supabaseUser?.user) {
+    // Jika berhasil buat user dengan email, dan fitur verifikasi SEDANG DIAKTIFKAN
+    if (!supabaseError && email && supabaseUser?.user && REQUIRE_EMAIL_VERIFICATION) {
       try {
         const backendUrl = process.env.BACKEND_URL || 'http://localhost:6500';
         const redirectToUrl = `${backendUrl}/api/user/verify-callback`;
@@ -646,7 +654,7 @@ const registerIbu = async (req, res) => {
     const supabasePayload = {
       password: password,
       phone_confirm: true,
-      email_confirm: false, // Set false agar mereka tetap harus verifikasi jika ada email
+      email_confirm: !REQUIRE_EMAIL_VERIFICATION, // Dinamis: true jika tidak butuh verifikasi, false jika butuh
     };
     if (email) supabasePayload.email = email;
     if (noTelp) supabasePayload.phone = noTelp;
@@ -655,8 +663,8 @@ const registerIbu = async (req, res) => {
     supabaseUser = result.data;
     supabaseError = result.error;
 
-    // Jika berhasil buat user dengan email, generate link manual untuk testing (Bypass Rate Limit)
-    if (!supabaseError && email && supabaseUser?.user) {
+    // Jika berhasil buat user dengan email, dan fitur verifikasi SEDANG DIAKTIFKAN
+    if (!supabaseError && email && supabaseUser?.user && REQUIRE_EMAIL_VERIFICATION) {
       try {
         const backendUrl = process.env.BACKEND_URL || 'http://localhost:6500';
         const redirectToUrl = `${backendUrl}/api/user/verify-callback`;
