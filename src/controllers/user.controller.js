@@ -53,8 +53,18 @@ const registerKader = async (req, res) => {
   } = req.body;
 
   // Validasi input dasar
-  if ((!email && !noTelp) || !password || !provinsi || !kota || !kecamatan || !kelurahan || !rt || !rw) {
-    return res.status(400).json({ message: 'Semua field wajib diisi (Email atau No Telp harus ada).' });
+  const missingFields = [];
+  if (!email && !noTelp) missingFields.push('Email atau No Telp');
+  if (!password) missingFields.push('Password');
+  if (!provinsi) missingFields.push('Provinsi');
+  if (!kota) missingFields.push('Kota');
+  if (!kecamatan) missingFields.push('Kecamatan');
+  if (!kelurahan) missingFields.push('Kelurahan');
+  if (!rt) missingFields.push('RT');
+  if (!rw) missingFields.push('RW');
+
+  if (missingFields.length > 0) {
+    return res.status(400).json({ message: `Mohon lengkapi data berikut: ${missingFields.join(', ')}.` });
   }
 
   // Jika posyanduId diberikan, tarik data Puskesmas dan Posyandu dari DB
@@ -77,6 +87,24 @@ const registerKader = async (req, res) => {
   }
 
   try {
+    // --- 0. PRE-CHECK DUPLIKASI (Email & NoTelp) DI PRISMA ---
+    const existingKaderEmail = email ? await prisma.kader.findFirst({ where: { email } }) : null;
+    const existingIbuEmail = email ? await prisma.ibuRumah.findFirst({ where: { email } }) : null;
+
+    const existingKaderPhone = noTelp ? await prisma.kader.findFirst({ where: { noTelp } }) : null;
+    const existingIbuPhone = noTelp ? await prisma.ibuRumah.findFirst({ where: { noTelp } }) : null;
+
+    const emailExists = !!(existingKaderEmail || existingIbuEmail);
+    const phoneExists = !!(existingKaderPhone || existingIbuPhone);
+
+    if (emailExists && phoneExists) {
+      return res.status(409).json({ message: 'Email dan Nomor Telepon sudah terdaftar. Silakan gunakan yang lain.' });
+    } else if (emailExists) {
+      return res.status(409).json({ message: 'Email sudah terdaftar. Silakan gunakan email lain.' });
+    } else if (phoneExists) {
+      return res.status(409).json({ message: 'Nomor Telepon sudah terdaftar. Silakan gunakan nomor lain.' });
+    }
+
     let supabaseUser, supabaseError;
 
     // 1. Membuat user di autentikasi Supabase
@@ -94,10 +122,19 @@ const registerKader = async (req, res) => {
 
     if (supabaseError) {
       console.error("Supabase registration error:", supabaseError.message);
-      if (supabaseError.message.includes("User already registered")) {
-        return res.status(409).json({ message: 'Email sudah terdaftar.' }); // Pesan lebih umum
+      if (supabaseError.message.toLowerCase().includes("email address has already been registered")) {
+        return res.status(409).json({ message: 'Email sudah terdaftar. Silakan gunakan email lain.' });
       }
-      return res.status(500).json({ message: 'Gagal mendaftar user di Supabase Auth.', error: supabaseError.message });
+      if (supabaseError.message.toLowerCase().includes("phone number already registered")) {
+         return res.status(409).json({ message: 'Nomor Telepon sudah terdaftar. Silakan gunakan nomor lain.' });
+      }
+      if (supabaseError.message.toLowerCase().includes("already been registered") || supabaseError.message.toLowerCase().includes("already registered")) {
+        return res.status(409).json({ message: 'Email atau Nomor Telepon sudah terdaftar. Silakan gunakan yang lain.' });
+      }
+      if (supabaseError.message.includes("phone format")) {
+         return res.status(400).json({ message: 'Format Nomor Telepon tidak valid. Pastikan menggunakan kode negara (contoh: +62812...).' });
+      }
+      return res.status(500).json({ message: `Gagal mendaftar akun: ${supabaseError.message}`, error: supabaseError.message });
     }
 
     // Pastikan user Supabase berhasil dibuat dan memiliki ID
@@ -166,6 +203,21 @@ const login = async (req, res, next) => {
   }
 
   try {
+    // 1. Cek eksistensi di database lokal terlebih dahulu
+    // Ini bertujuan agar kita bisa memberikan pesan error yang spesifik (Email tidak terdaftar)
+    // Karena Supabase secara default akan mengembalikan 'Invalid login credentials' untuk email yang tidak ada.
+    let userExists = null;
+    if (email) {
+      userExists = await prisma.kader.findFirst({ where: { email } }) || await prisma.ibuRumah.findFirst({ where: { email } });
+    } else if (noTelp) {
+      userExists = await prisma.kader.findFirst({ where: { noTelp } }) || await prisma.ibuRumah.findFirst({ where: { noTelp } });
+    }
+
+    if (!userExists) {
+      return res.status(404).json({ message: email ? 'Email tidak terdaftar.' : 'Nomor telepon tidak terdaftar.' });
+    }
+
+    // 2. Jika akun ada di database, lanjutkan login ke Supabase
     let signInPayload = { password };
     if (email) {
       signInPayload.email = email;
@@ -178,7 +230,9 @@ const login = async (req, res, next) => {
 
     if (error) {
       console.error("Supabase login error:", error.message);
-      return res.status(401).json({ message: error.message || 'Login gagal. Email/No Telp atau password salah.' });
+      // Karena kita sudah memfilter "Email tidak terdaftar" di atas, 
+      // Jika sampai sini terjadi error "Invalid login credentials", maka dipastikan itu adalah salah password.
+      return res.status(401).json({ message: 'Password salah. Silakan coba lagi.' });
     }
 
     const supabaseUser = data.user;
@@ -511,11 +565,40 @@ const registerIbu = async (req, res) => {
   } = req.body;
 
   // Validasi input dasar
-  if ((!email && !noTelp) || !password || !namaIbu || !provinsi || !kota || !kecamatan || !kelurahan || !rt || !rw) {
-    return res.status(400).json({ message: 'Semua field wajib diisi (Email atau No Telp harus ada).' });
+  const missingFields = [];
+  if (!email && !noTelp) missingFields.push('Email atau No Telp');
+  if (!password) missingFields.push('Password');
+  if (!namaIbu) missingFields.push('Nama Ibu');
+  if (!provinsi) missingFields.push('Provinsi');
+  if (!kota) missingFields.push('Kota');
+  if (!kecamatan) missingFields.push('Kecamatan');
+  if (!kelurahan) missingFields.push('Kelurahan');
+  if (!rt) missingFields.push('RT');
+  if (!rw) missingFields.push('RW');
+
+  if (missingFields.length > 0) {
+    return res.status(400).json({ message: `Mohon lengkapi data berikut: ${missingFields.join(', ')}.` });
   }
 
   try {
+    // --- 0. PRE-CHECK DUPLIKASI (Email & NoTelp) DI PRISMA ---
+    const existingKaderEmail = email ? await prisma.kader.findFirst({ where: { email } }) : null;
+    const existingIbuEmail = email ? await prisma.ibuRumah.findFirst({ where: { email } }) : null;
+
+    const existingKaderPhone = noTelp ? await prisma.kader.findFirst({ where: { noTelp } }) : null;
+    const existingIbuPhone = noTelp ? await prisma.ibuRumah.findFirst({ where: { noTelp } }) : null;
+
+    const emailExists = !!(existingKaderEmail || existingIbuEmail);
+    const phoneExists = !!(existingKaderPhone || existingIbuPhone);
+
+    if (emailExists && phoneExists) {
+      return res.status(409).json({ message: 'Email dan Nomor Telepon sudah terdaftar. Silakan gunakan yang lain.' });
+    } else if (emailExists) {
+      return res.status(409).json({ message: 'Email sudah terdaftar. Silakan gunakan email lain.' });
+    } else if (phoneExists) {
+      return res.status(409).json({ message: 'Nomor Telepon sudah terdaftar. Silakan gunakan nomor lain.' });
+    }
+
     let supabaseUser, supabaseError;
 
     // 1. Membuat user di autentikasi Supabase
@@ -533,10 +616,19 @@ const registerIbu = async (req, res) => {
 
     if (supabaseError) {
       console.error("Supabase registration error:", supabaseError.message);
-      if (supabaseError.message.includes("User already registered")) {
-        return res.status(409).json({ message: 'Email sudah terdaftar.' }); // Pesan lebih umum
+      if (supabaseError.message.toLowerCase().includes("email address has already been registered")) {
+        return res.status(409).json({ message: 'Email sudah terdaftar. Silakan gunakan email lain.' });
       }
-      return res.status(500).json({ message: 'Gagal mendaftar user di Supabase Auth.', error: supabaseError.message });
+      if (supabaseError.message.toLowerCase().includes("phone number already registered")) {
+         return res.status(409).json({ message: 'Nomor Telepon sudah terdaftar. Silakan gunakan nomor lain.' });
+      }
+      if (supabaseError.message.toLowerCase().includes("already been registered") || supabaseError.message.toLowerCase().includes("already registered")) {
+        return res.status(409).json({ message: 'Email atau Nomor Telepon sudah terdaftar. Silakan gunakan yang lain.' });
+      }
+      if (supabaseError.message.includes("phone format")) {
+         return res.status(400).json({ message: 'Format Nomor Telepon tidak valid. Pastikan menggunakan kode negara (contoh: +62812...).' });
+      }
+      return res.status(500).json({ message: `Gagal mendaftar akun: ${supabaseError.message}`, error: supabaseError.message });
     }
 
     // Pastikan user Supabase berhasil dibuat dan memiliki ID
