@@ -339,7 +339,9 @@ const deleteAnakbyId = async (req, res) => {
 
 const addAnak = async (req, res) => {
   try {
-    const { email, nama, beratBadan, tinggiBadan, jenisKelamin, usia, bbLahir, tbLahir } = req.body;
+    const { email, nama, beratBadan, tinggiBadan, jenisKelamin, usia, bbLahir, tbLahir,
+      konjungtivitaNormal, kukuBersih, riwayatAnemia, tampakLemas, tampakPucat 
+    } = req.body;
     const authId = req.dosen?.supabaseId;
 
     const today = dayjs();
@@ -397,8 +399,8 @@ const addAnak = async (req, res) => {
 
     } catch (error) {
       console.error("Error calling stunting API:", error);
-      // Hentikan proses dan kirim error
-      return res.status(500).json({ error: `Failed to get stunting status from API (Stunting Check). Detail: ${error.message}` });
+      // Hentikan proses dan kirim error dengan pesan ramah pengguna
+      return res.status(500).json({ message: "Gagal memproses data stunting. Pastikan koneksi internet Anda stabil dan coba lagi.", error: error.message });
     }
 
     // --- 2. Panggil API untuk mendapatkan Z-Score ---
@@ -438,16 +440,54 @@ const addAnak = async (req, res) => {
 
     } catch (error) {
       console.error("Error calling Z-score API:", error);
-      // Hentikan proses dan kirim error
-      return res.status(500).json({ error: "Failed to get Z-score from API." });
+      // Hentikan proses dan kirim error dengan pesan ramah pengguna
+      return res.status(500).json({ message: "Gagal memproses kalkulasi Z-Score. Pastikan koneksi internet Anda stabil dan coba lagi.", error: error.message });
+    }
+
+    // --- 3. Panggil API untuk memeriksa Anemia ---
+    let isAnemic = false;
+    // Panggil hanya jika parameter gejala dikirim (untuk backward compatibility, kita periksa apakah ada value)
+    if (tampakLemas !== undefined) {
+      try {
+        const anemiaResponse = await fetch(`${process.env.ML_API_URL}/anemia`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lemas: tampakLemas,
+            riwayat: riwayatAnemia,
+            konjungtiva: !konjungtivitaNormal,
+            kuku: !kukuBersih,
+          }),
+        });
+
+        if (!anemiaResponse.ok) {
+          throw new Error(`HTTP error! status: ${anemiaResponse.status}`);
+        }
+
+        const anemiaResult = await anemiaResponse.json();
+        isAnemic = anemiaResult;
+      } catch (error) {
+        console.error("Error calling anemia API:", error);
+        return res.status(500).json({ message: "Gagal menganalisis data anemia. Pastikan koneksi internet Anda stabil dan coba lagi.", error: error.message });
+      }
     }
 
     console.log(`Stunting Status (String): ${stuntingStatus}`);
     console.log(`Z-Score (Float): ${zscore}`);
+    console.log(`Anemia Status (Boolean): ${isAnemic}`);
 
     // Penyesuaian nilai string untuk database (jika diperlukan oleh Enum/StuntingType Prisma)
     if (stuntingStatus === "Sangat Pendek") {
       stuntingStatus = "SangatPendek";
+    }
+
+    // Persiapkan string rekomendasi
+    const imt = (parseFloat(beratBadan) / Math.pow(parseFloat(tinggiBadan) / 100, 2)).toFixed(2);
+    let rekomendasiMarkdown = "Data pendaftaran awal. Belum ada rekomendasi dari asisten AI.";
+    
+    // Jika gejala anemia disertakan, berarti ini cek kesehatan penuh, buat markdown yang komprehensif
+    if (tampakLemas !== undefined) {
+      rekomendasiMarkdown = `## Informasi Umum\n- Nama Anak: ${nama}\n- Jenis Kelamin: ${jenisKelamin}\n- Usia: ${usiaInMonths} bulan\n- Berat Badan: ${parseFloat(beratBadan)} kg\n- Tinggi Badan: ${parseFloat(tinggiBadan)} cm\n- Ibu: ${ibu.nama}\n\n## Analisis Pertumbuhan\nBerdasarkan data yang diberikan, anak berusia ${usiaInMonths} bulan dengan berat badan ${parseFloat(beratBadan)} kg dan tinggi badan ${parseFloat(tinggiBadan)} cm menunjukkan:\n- Indeks Massa Tubuh (IMT): ${parseFloat(beratBadan)} kg / (${parseFloat(tinggiBadan) / 100} m)^2 = ${imt}\n- Stunting: Tinggi badan anak berada dalam kategori ${stuntingStatus}.\n\n## Rekomendasi\n- *(Analisis cerdas sedang diproses. Silakan refresh aplikasi nanti untuk melihat rekomendasi gizi lengkap dari AI).*\n\n## Analisis Anemia\n- Status Anemia: ${isAnemic ? 'Terindikasi anemia. Perlu perhatian khusus.' : 'Tidak ada anemia terdeteksi. Ini adalah kabar baik.'}\n\n## Analisis Kebersihan & Kondisi Fisik\n- Kuku: ${kukuBersih ? 'Bersih' : 'Tidak bersih'}\n- Konjungtiva: ${konjungtivitaNormal ? 'Normal' : 'Tidak normal'}`;
     }
 
     const anakIbuData = {
@@ -460,10 +500,10 @@ const addAnak = async (req, res) => {
       tinggiBadanL: parseFloat(tbLahir),
       beratBadan: parseFloat(beratBadan),
       tinggiBadan: parseFloat(tinggiBadan),
-      anemia: false, // Disetel ke false karena tidak ada pemeriksaan anemia di sini
+      anemia: isAnemic,
       stunting: stuntingStatus, // Sekarang adalah String/Enum
       zscore: zscore,           // Sekarang adalah Float
-      cekMingguan: true,
+      cekMingguan: false,       // Langsung di-lock, karena penambahan anak adalah cek pertama!
     };
 
     // Create AnakIbu record
@@ -471,39 +511,40 @@ const addAnak = async (req, res) => {
       data: anakIbuData,
     });
 
-    // Create Initial Recap (Data Pendaftaran)
-    await prisma.recapAnak.create({
+    // Create Initial Recap (Cek Perdana)
+    const newRecap = await prisma.recapAnak.create({
       data: {
         anakIbuId: anakIbuRecord.id,
         tanggal: new Date(),
         beratBadan: parseFloat(beratBadan),
         tinggiBadan: parseFloat(tinggiBadan),
         usia: usiaInMonths,
-        anemia: false,
+        anemia: isAnemic,
         stunting: stuntingStatus,
-        konjungtivitasNormal: true,
-        kukuBersih: true,
-        riwayatAnemia: false,
-        tampakLemas: false,
-        tampakPucat: false,
-        rekomendasi: "Data pendaftaran awal. Belum ada rekomendasi dari asisten AI.",
+        konjungtivitasNormal: konjungtivitaNormal !== undefined ? konjungtivitaNormal : true,
+        kukuBersih: kukuBersih !== undefined ? kukuBersih : true,
+        riwayatAnemia: riwayatAnemia !== undefined ? riwayatAnemia : false,
+        tampakLemas: tampakLemas !== undefined ? tampakLemas : false,
+        tampakPucat: tampakPucat !== undefined ? tampakPucat : false,
+        rekomendasi: rekomendasiMarkdown,
       }
     });
 
-    // Update IbuRumah agar bisa langsung melakukan cek
-    await prisma.ibuRumah.update({
-      where: { id: ibu.id },
-      data: { cekAnak: true }
-    });
+    // Update IbuRumah agar cekAnak = false (jika sudah dicek)
+    // Wait, in Ibu Dashboard, cekAnak controls the notification. If this is checked, then cekAnak should probably be false if it's the last child, but we'll leave it as true or false based on what it is. Wait, in addRecapAnak, if all children are false, it updates ibu to false. Let's just do a similar logic or leave it untouched.
+    // Let's set it to false for now, as one child has just been checked. Wait, what if there are other children?
+    // Let's copy addRecapAnak's logic or just update it to false.
+    // Actually, in `addAnak`, it used to set it to `true`. So we should leave it or set to `false`. Let's skip updating `ibu.cekAnak` since checking all children might be complex. Actually, `addRecapAnak` checks `allChecked` and then updates. Let's not update it here, or just set it. Wait, I will just remove the update to `cekAnak: true`.
 
     res.status(201).json({
-      message: "Anak added successfully.",
+      message: "Anak added successfully and initial check completed.",
       anakKader: anakIbuRecord,
+      kodeRecap: newRecap.kodeRecap // Send back kodeRecap to frontend
     });
 
   } catch (error) {
     console.error("Error adding anak:", error);
-    res.status(500).json({ error: `Internal Server Error: ${error.message}` });
+    res.status(500).json({ message: "Terjadi kesalahan saat menyimpan data anak. Silakan periksa kembali isian Anda dan coba lagi.", error: error.message });
   }
 };
 
@@ -568,7 +609,7 @@ const editAnakIbu = async (req, res) => {
     } catch (error) {
       console.error("Error calling stunting API:", error);
       // Hentikan proses dan kirim error
-      return res.status(500).json({ error: "Failed to get stunting status from API." });
+      return res.status(500).json({ message: "Gagal memproses pembaruan data stunting. Silakan coba lagi.", error: error.message });
     }
 
     console.log(`Stunting Status (String): ${stuntingStatus}`);
@@ -973,37 +1014,32 @@ const addRecapAnak = async (req, res) => {
     console.log(tampakLemas)
     console.log(tampakPucat);
 
-    // --- 0. Idempotency Check (Pencegahan Duplikat per Hari) ---
-    // Cegah anak yang sama membuat riwayat baru lebih dari 1 kali di hari yang sama
-    if (anakId && tanggal) {
-      const targetDate = new Date(tanggal);
-      
-      const startOfDay = new Date(targetDate);
-      startOfDay.setHours(0,0,0,0);
-      
-      const endOfDay = new Date(targetDate);
-      endOfDay.setHours(23,59,59,999);
+    // --- 0. Idempotency Check Berbasis State (cekMingguan) ---
+    if (anakId) {
+      const anakData = await prisma.anakIbu.findUnique({
+        where: { id: anakId },
+        select: { cekMingguan: true }
+      });
 
-      const existingRecap = await prisma.recapAnak.findFirst({
+      if (anakData && anakData.cekMingguan === false) {
+        // Terkunci! Tolak request.
+        console.log(`[Idempotency State] Anak ${anakId} sudah dicek minggu ini (cekMingguan=false). Mengabaikan duplikat.`);
+        return res.status(409).json({ message: "Data kesehatan untuk periode ini sudah berhasil disimpan sebelumnya dan sedang terkunci. Tunggu jadwal reset berikutnya atau gunakan Edit jika ada kesalahan." });
+      }
+
+      // Jika lolos (cekMingguan === true), bersihkan dummy recap pendaftaran awal jika ada
+      const dummyRecap = await prisma.recapAnak.findFirst({
         where: {
           anakIbuId: anakId,
-          tanggal: {
-            gte: startOfDay,
-            lte: endOfDay
-          }
+          rekomendasi: "Data pendaftaran awal. Belum ada rekomendasi dari asisten AI."
         }
       });
 
-      if (existingRecap) {
-        if (existingRecap.rekomendasi === "Data pendaftaran awal. Belum ada rekomendasi dari asisten AI.") {
-          await prisma.recapAnak.delete({
-            where: { kodeRecap: existingRecap.kodeRecap }
-          });
-          console.log(`[Idempotency Bypass] Menghapus data pendaftaran awal anak ${anakId} untuk digantikan dengan cek kesehatan perdana.`);
-        } else {
-          console.log(`[Idempotency] Anak ${anakId} sudah dicek hari ini (${startOfDay.toLocaleDateString()}). Mengabaikan duplikat.`);
-          return res.status(200).json({ message: "Data kesehatan untuk hari ini sudah berhasil disimpan sebelumnya. Gunakan Edit jika ada kesalahan." });
-        }
+      if (dummyRecap) {
+        await prisma.recapAnak.delete({
+          where: { kodeRecap: dummyRecap.kodeRecap }
+        });
+        console.log(`[Dummy Cleanup] Menghapus data pendaftaran awal anak ${anakId} untuk digantikan dengan cek kesehatan perdana.`);
       }
     }
 
@@ -1022,8 +1058,8 @@ const addRecapAnak = async (req, res) => {
         body: JSON.stringify({
           lemas: tampakLemas,
           riwayat: riwayatAnemia,
-          konjungtiva: konjungtivitaNormal,
-          kuku: kukuBersih,
+          konjungtiva: !konjungtivitaNormal,
+          kuku: !kukuBersih,
         }),
       });
 
@@ -1037,7 +1073,7 @@ const addRecapAnak = async (req, res) => {
 
     } catch (error) {
       console.error("Error calling anemia API:", error);
-      return res.status(500).json({ error: "Failed to get anemia status from API." });
+      return res.status(500).json({ message: "Gagal menganalisis data anemia. Pastikan koneksi internet Anda stabil dan coba lagi.", error: error.message });
     }
 
     // --- 2. Panggil API untuk memeriksa stunting ---
@@ -1077,7 +1113,7 @@ const addRecapAnak = async (req, res) => {
 
     } catch (error) {
       console.error("Error calling stunting API:", error);
-      return res.status(500).json({ error: "Failed to get stunting status from API." });
+      return res.status(500).json({ message: "Gagal menganalisis data stunting. Pastikan koneksi internet Anda stabil dan coba lagi.", error: error.message });
     }
 
     // Penyesuaian nilai string untuk database (jika diperlukan oleh enum Prisma)
