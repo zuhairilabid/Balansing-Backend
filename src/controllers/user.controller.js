@@ -131,7 +131,9 @@ const registerKader = async (req, res) => {
     // Jika berhasil buat user dengan email, dan fitur verifikasi SEDANG DIAKTIFKAN
     if (!supabaseError && email && supabaseUser?.user && REQUIRE_EMAIL_VERIFICATION) {
       try {
-        const backendUrl = process.env.BACKEND_URL || 'http://localhost:6500';
+        const protocol = req.protocol || 'http';
+        const host = req.get('host') || 'localhost:6500';
+        const backendUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
         const redirectToUrl = `${backendUrl}/api/user/verify-callback`;
 
         const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
@@ -362,7 +364,9 @@ const requestPasswordReset = async (req, res) => {
 
   try {
     // Menggunakan variabel environment atau fallback ke localhost untuk testing lokal
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:6500';
+    const protocol = req.protocol || 'http';
+    const host = req.get('host') || 'localhost:6500';
+    const backendUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
     const redirectToUrl = `${backendUrl}/api/user/handleresetpassword`;
 
     // Gunakan supabaseAdmin untuk mengirim email reset password
@@ -666,7 +670,9 @@ const registerIbu = async (req, res) => {
     // Jika berhasil buat user dengan email, dan fitur verifikasi SEDANG DIAKTIFKAN
     if (!supabaseError && email && supabaseUser?.user && REQUIRE_EMAIL_VERIFICATION) {
       try {
-        const backendUrl = process.env.BACKEND_URL || 'http://localhost:6500';
+        const protocol = req.protocol || 'http';
+        const host = req.get('host') || 'localhost:6500';
+        const backendUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
         const redirectToUrl = `${backendUrl}/api/user/verify-callback`;
 
         const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
