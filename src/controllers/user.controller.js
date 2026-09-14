@@ -133,7 +133,7 @@ const registerKader = async (req, res) => {
       try {
         const protocol = req.protocol || 'http';
         const host = req.get('host') || 'localhost:6500';
-        const backendUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
+        const backendUrl = process.env.BACKEND_URL || 'http://187.77.122.232:6500';
         const redirectToUrl = `${backendUrl}/api/user/verify-callback`;
 
         const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
@@ -366,7 +366,7 @@ const requestPasswordReset = async (req, res) => {
     // Menggunakan variabel environment atau fallback ke localhost untuk testing lokal
     const protocol = req.protocol || 'http';
     const host = req.get('host') || 'localhost:6500';
-    const backendUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
+    const backendUrl = process.env.BACKEND_URL || 'http://187.77.122.232:6500';
     const redirectToUrl = `${backendUrl}/api/user/handleresetpassword`;
 
     // Gunakan supabaseAdmin untuk mengirim email reset password
@@ -672,7 +672,7 @@ const registerIbu = async (req, res) => {
       try {
         const protocol = req.protocol || 'http';
         const host = req.get('host') || 'localhost:6500';
-        const backendUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
+        const backendUrl = process.env.BACKEND_URL || 'http://187.77.122.232:6500';
         const redirectToUrl = `${backendUrl}/api/user/verify-callback`;
 
         const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
